@@ -1,0 +1,36 @@
+Modulo Clientes:
+1.- Separar nombre completo en dos campos, nombres y apellidos
+2.- Adicionar a todos los campos del formulario como OBLIGATORIOS a excepcion de NOTAS
+
+Modulo Bicicletas:
+1.- Adicionar Tipo de Bicicleta: Ruta, MTB, etc
+2.- Adicionar a todos los campos del formulario como OBLIGATORIOS a excepcion de NOTAS
+
+Modulo Mecanicos:
+1- Adicionar numero de teléfono, Dirección, DUI, fecha de nacimiento. Separar nombre en dos campos: Nombres y Apellidos.
+2- Campo email obligatorio al igual que teléfono
+3- La búsqueda de Mecanincos por nombre u otro no funciona.
+4- eror al crear nuevo mecanico: Error: permission denied for sequence mecanicos_id_seq 
+5- El botón azul CANCELAR no borra los datos ingresados la ultima vez en el formulario de creación de mecanico
+6- Adicionar a todos los campos del formulario como OBLIGATORIOS a excepcion de NOTAS
+7.- Edición funciona bien. ELiminacion NO PROBADO
+
+Modulo Ordenes de Servicio:
+1.- En Edición de Ordenes de Servicio, a pesar de que ya hay asignado un mecanico la pantalla muestra NO ASIGNADO
+2.- Debe haber una relación uno a varios entre cliente y sus bicicletas, ya que al momento de relacionar la bicicleta a la orden de servicio el formulario muestra todas las bicicletas existente en la tabla BICICLETAS lo que hará imposible identificar cual es la del cliente.
+3- Al intentar crear una nueva orden de servicio el formulario aparece con datos cargados de la ultima edición y el botón dice actualizar no Crear por lo que esta pantalla no funciona correctamente. NO PERMITE CREAR NUEVAS ORDENES DE SERVICIO.
+4- Cuando logre limpiar los datos remanentes del formulario de crear nueva orden de servicio al guardar da el error: Error: permission denied for sequence ordenes_servicio_id_seq
+5- Debera crearse una nueva tabla para almacenar la SOLICITUD DE SERVICIO, esta tabla debe relacionarse con Clientes, Bicicletas y Ordenes de Servicio. Esta SOLICITUD de Servicio debe contener: Cliente, Bicicleta del Cliente, Fecha de Solicitud, Detalles de servicio Solicitado por el cliente, Síntomas o Detalles brindados por el cliente para la reparación o mantenimiento de su bicicleta.
+6- Debe crearse una cotización para enviar al cliente con el detalle del servicio que se le prestara a su bicicleta, repuestos que se utilizaran, cada uno con su precio y la fecha estimada de entrega.
+7- Esta información será la base para crear la Orden de Servicio correspondiente.
+8- Eliminación de Ordenes de servicio NO PROBADA.
+
+Modulo de Inventarios:
+1- Crear tabla de categorías y las relaciones correspondientes a inventarios.
+2- Crear tabla de Marcas y las relaciones correspondientes con categorías e inventarios
+3- Crear tabla de Proveedores y las relaciones correspondientes con Inventario
+4- Al Adicionar un Item de Inventario muestra el error: Error: permission denied for sequence inventario_id_seq
+5.-Elimminacion de Item No probado
+
+PATRE 3 DE PRUEBAS NO REALIZADAS POR CARECER DE SENTIDO MIENTRAS NO SE CORRIJA ERRORES PARTE 2
+
