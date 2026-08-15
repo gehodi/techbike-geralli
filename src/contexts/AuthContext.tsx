@@ -25,8 +25,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe()
   }, [])
 
+  // NUEVA FUNCIÓN: signOut
+  const signOut = async () => {
+    const { error } = await supabase.auth.signOut()
+    if (error) {
+      console.error('Error al cerrar sesión:', error)
+    }
+  }
+
   return (
-    <AuthContext.Provider value={{ session, user, loading }}>
+    <AuthContext.Provider value={{ session, user, loading, signOut }}>
       {children}
     </AuthContext.Provider>
   )
@@ -34,6 +42,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext)
-  if (context === undefined) throw new Error('useAuth debe usarse dentro de AuthProvider')
+  if (context === undefined) {
+    throw new Error('useAuth debe usarse dentro de AuthProvider')
+  }
   return context
 }

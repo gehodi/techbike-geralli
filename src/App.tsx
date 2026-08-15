@@ -43,7 +43,7 @@ function App() {
 
   return (
     <>
-      <Toaster 
+      <Toaster
         position="top-right"
         toastOptions={{
           duration: 3500,
@@ -79,7 +79,7 @@ function App() {
           <Route path="/proveedores" element={<Proveedores />} />
           <Route path="/tipos-bicicletas" element={<TiposBicicletas />} />
           <Route path="/servicios" element={<Servicios />} />
-	  <Route path="/registro-danos" element={<RegistroDanos />} />
+          <Route path="/registro-danos" element={<RegistroDanos />} />
           <Route path="/reportes" element={<Reportes />} />
         </Route>
       </Routes>
