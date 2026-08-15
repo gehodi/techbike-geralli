@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { AlertTriangle, TrendingDown, Package, ShoppingCart } from 'lucide-react'
-import toast from 'react-hot-toast'
+import { AlertTriangle, Package, ShoppingCart } from 'lucide-react'
 
 interface ItemBajoStock {
   id: number

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { Search, Eye, Filter, Package, TrendingUp, TrendingDown, AlertTriangle, CheckCircle, XCircle } from 'lucide-react'
+import { Search, Eye, Filter, Package, TrendingUp, TrendingDown, AlertTriangle, CheckCircle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import ModalDetalle from '../components/ModalDetalle'
 import ControlesPaginacion from '../components/ControlesPaginacion'

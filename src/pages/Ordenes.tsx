@@ -50,7 +50,6 @@ interface DetalleItem {
   esNuevo?: boolean
 }
 interface Cliente { id: string; nombres: string; apellidos: string }
-interface Bicicleta { id: string; marca: string; modelo: string; numero_serie: string; cliente_id: string; foto_principal_url?: string }
 interface Mecanico { id: number; nombres: string; apellidos: string }
 interface OrdenIndex { id: number; numero_orden: string; cliente_nombre: string; bicicleta_info: string }
 
@@ -60,7 +59,6 @@ export default function Ordenes() {
   const [ordenes, setOrdenes] = useState<OrdenServicio[]>([])
   const [ordenesIndex, setOrdenesIndex] = useState<OrdenIndex[]>([])
   const [clientes, setClientes] = useState<Cliente[]>([])
-  const [bicicletas, setBicicletas] = useState<Bicicleta[]>([])
   const [mecanicos, setMecanicos] = useState<Mecanico[]>([])
   const [servicios, setServicios] = useState<Servicio[]>([])
   const [inventario, setInventario] = useState<ItemInventario[]>([])
@@ -73,13 +71,10 @@ export default function Ordenes() {
   const [detalleRepuestos, setDetalleRepuestos] = useState<DetalleItem[]>([])
   const [nuevoServicio, setNuevoServicio] = useState({ servicio_id: '', cantidad: '1' })
   const [nuevoRepuesto, setNuevoRepuesto] = useState({ item_id: '', cantidad: '1' })
-  
-  // NUEVO: Estado para evitar doble ejecución al completar
   const [showCompletionModal, setShowCompletionModal] = useState(false)
   const [completionOrdenId, setCompletionOrdenId] = useState<number | null>(null)
   const [completionData, setCompletionData] = useState<Record<string, { usada: number, dañada: number }>>({})
   const [completandoOrden, setCompletandoOrden] = useState(false)
-  
   const [paginaActual, setPaginaActual] = useState(1)
   const [registrosPorPagina, setRegistrosPorPagina] = useState(25)
   const [totalRegistros, setTotalRegistros] = useState(0)
@@ -92,7 +87,7 @@ export default function Ordenes() {
   })
 
   useEffect(() => {
-    fetchClientes(); fetchBicicletas(); fetchMecanicos(); fetchServicios(); fetchInventario(); fetchOrdenesIndex()
+    fetchClientes(); fetchMecanicos(); fetchServicios(); fetchInventario(); fetchOrdenesIndex()
   }, [])
 
   useEffect(() => {
@@ -172,11 +167,6 @@ export default function Ordenes() {
   async function fetchClientes() {
     const { data } = await supabase.from('clientes').select('id, nombres, apellidos').order('apellidos')
     setClientes(data || [])
-  }
-
-  async function fetchBicicletas() {
-    const { data } = await supabase.from('bicicletas').select('id, marca, modelo, numero_serie, cliente_id, foto_principal_url').order('marca')
-    setBicicletas(data || [])
   }
 
   async function fetchMecanicos() {
@@ -266,7 +256,6 @@ export default function Ordenes() {
       if (editingId) {
         const { error } = await supabase.from('ordenes_servicio').update(data).eq('id', editingId)
         if (error) throw error
-        // Liberar reservas anteriores antes de borrar detalles
         const { data: detallesActuales } = await supabase.from('detalle_ordenes_servicio').select('*').eq('orden_id', editingId)
         for (const rep of (detallesActuales || []).filter((d: any) => d.tipo === 'repuesto')) {
           const { data: itemActual } = await supabase.from('inventario').select('stock_reservado').eq('id', rep.item_inventario_id).single()
@@ -314,7 +303,6 @@ export default function Ordenes() {
           }
         }
       }
-
       resetForm(); fetchOrdenes(); fetchInventario(); fetchOrdenesIndex()
     } catch (error: any) {
       toast.error('Error: ' + error.message)
@@ -334,7 +322,6 @@ export default function Ordenes() {
       cotizacion_id: o.cotizacion_id?.toString() || ''
     })
     setEditingId(o.id); setShowForm(true); await fetchDetalleOrden(o.id)
-    // Scroll automático al formulario al editar
     setTimeout(() => {
       formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }, 100)
@@ -376,27 +363,19 @@ export default function Ordenes() {
     setCompletionOrdenId(orden.id); setCompletionData(initialData); setShowCompletionModal(true)
   }
 
-  // CORREGIDO: Función para completar orden con prevención de doble ejecución
   async function confirmarCompletado() {
-    // Validación 1: Verificar si ya se está procesando
     if (completandoOrden) {
       toast.error('Ya se está procesando esta orden')
       return
     }
-    
-    // Validación 2: Verificar ID válido
     if (!completionOrdenId) {
       toast.error('ID de orden no válido')
       return
     }
-    
-    // Marcar como procesando
     setCompletandoOrden(true)
-    
     try {
       const { data: detallesBD, error: errorDetalles } = await supabase.from('detalle_ordenes_servicio').select('*').eq('orden_id', completionOrdenId)
       if (errorDetalles) throw errorDetalles
-
       let costoRealCalculado = 0
       for (const det of (detallesBD || [])) {
         if (det.tipo === 'servicio') costoRealCalculado += det.cantidad * det.precio_unitario
@@ -405,26 +384,21 @@ export default function Ordenes() {
           costoRealCalculado += ajuste.usada * det.precio_unitario
         }
       }
-
-      // Procesar repuestos - SOLO genera movimiento de consumo
       for (const det of (detallesBD || []).filter((d: any) => d.tipo === 'repuesto')) {
         if (!det.item_inventario_id) continue
         const ajuste = completionData[det.id] || { usada: det.cantidad, dañada: 0 }
-        const { data: itemActual, error: errorItem } = await supabase.from('inventario').select('stock_actual, stock_reservado, stock_dañado').eq('id', det.item_inventario_id).single()
+        // CORRECCIÓN: Comillas dobles en stock_dañado
+        const { data: itemActual, error: errorItem } = await supabase.from('inventario').select('stock_actual, stock_reservado, "stock_dañado"').eq('id', det.item_inventario_id).single()
         if (errorItem) throw errorItem
-
         const nuevoStockActual = itemActual.stock_actual - ajuste.usada - ajuste.dañada
         const nuevoStockReservado = Math.max(0, (itemActual.stock_reservado || 0) - det.cantidad)
         const nuevoStockDanado = (itemActual.stock_dañado || 0) + ajuste.dañada
-
         await supabase.from('inventario').update({
           stock_actual: nuevoStockActual,
           stock_reservado: nuevoStockReservado,
           stock_dañado: nuevoStockDanado,
           estado: nuevoStockActual === 0 ? 'agotado' : 'disponible'
         }).eq('id', det.item_inventario_id)
-
-        // SOLO registrar movimiento de consumo si hay unidades usadas
         if (ajuste.usada > 0) {
           await supabase.from('movimientos_inventario').insert({
             item_inventario_id: det.item_inventario_id,
@@ -438,8 +412,6 @@ export default function Ordenes() {
             usuario_responsable: 'sistema'
           })
         }
-
-        // Registrar daño si aplica
         if (ajuste.dañada > 0) {
           await supabase.from('inventario_dañado').insert({
             item_inventario_id: det.item_inventario_id,
@@ -450,31 +422,24 @@ export default function Ordenes() {
             valor_perdida: ajuste.dañada * det.precio_unitario
           })
         }
-
         await supabase.from('detalle_ordenes_servicio').update({
           cantidad_usada: ajuste.usada,
           cantidad_dañada: ajuste.dañada,
           estado_item: 'usado'
         }).eq('id', det.id)
       }
-
-      // Procesar servicios
       for (const det of (detallesBD || []).filter((d: any) => d.tipo === 'servicio')) {
         await supabase.from('detalle_ordenes_servicio').update({
           estado_item: 'completado',
           cantidad_usada: det.cantidad
         }).eq('id', det.id)
       }
-
-      // Actualizar orden
       const { error: errorOrden } = await supabase.from('ordenes_servicio').update({
         estado: 'Completada',
         fecha_entrega_real: new Date().toISOString().split('T')[0],
         costo_real: costoRealCalculado
       }).eq('id', completionOrdenId)
-      
       if (errorOrden) throw errorOrden
-
       toast.success(`Orden completada. Costo real: ${formatCurrency(costoRealCalculado)}`)
       setShowCompletionModal(false)
       setCompletionOrdenId(null)
@@ -483,7 +448,6 @@ export default function Ordenes() {
     } catch (error: any) {
       toast.error('Error al completar: ' + error.message)
     } finally {
-      // Liberar el bloqueo siempre
       setCompletandoOrden(false)
     }
   }
@@ -510,7 +474,6 @@ export default function Ordenes() {
       default: return 'bg-gray-100 text-gray-800'
     }
   }
-
   const formatDate = (d: string) => d ? new Date(d).toLocaleDateString('es-CO') : '-'
   const formatCurrency = (v: number | null | undefined) => {
     if (v === null || v === undefined) return '$0'
@@ -527,7 +490,6 @@ export default function Ordenes() {
         <div className="text-sm text-slate-500 italic">* Las órdenes se generan automáticamente al aprobar una cotización</div>
       </div>
 
-      {/* FORMULARIO CON REFERENCIA PARA SCROLL */}
       {showForm && (
         <div ref={formRef} className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 scroll-mt-20">
           <h2 className="text-lg font-semibold text-slate-800 mb-4">{editingId ? `Editar Orden ${formData.numero_orden}` : 'Nueva Orden'}</h2>
@@ -626,7 +588,6 @@ export default function Ordenes() {
         </div>
       )}
 
-      {/* MODAL DE COMPLETADO */}
       {showCompletionModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
@@ -683,7 +644,6 @@ export default function Ordenes() {
         </div>
       )}
 
-      {/* TABLA DE ÓRDENES */}
       <div className="relative">
         <Search className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
         <input

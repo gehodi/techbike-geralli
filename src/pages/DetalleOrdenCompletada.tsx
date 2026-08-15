@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { ArrowLeft, Package, Wrench, CheckCircle, AlertTriangle, DollarSign } from 'lucide-react'
+import { ArrowLeft, Package, Wrench, AlertTriangle, DollarSign } from 'lucide-react'
 import toast from 'react-hot-toast'
+
 
 interface OrdenDetalle {
   id: number

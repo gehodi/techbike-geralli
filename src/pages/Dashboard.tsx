@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { Users, ClipboardList, Package, DollarSign, TrendingUp, AlertTriangle, Clock } from 'lucide-react'
 import AlertasStock from '../components/AlertasStock'
-import toast from 'react-hot-toast'
 
 interface Stats {
   totalClientes: number

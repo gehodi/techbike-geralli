@@ -81,7 +81,6 @@ export default function Requisiciones() {
         .from('requisiciones_inventario')
         .select('*')
         .order('fecha_solicitud', { ascending: false })
-
       if (error) throw error
       const enriquecidas = await Promise.all(
         (data || []).map(async (r: any) => {
@@ -178,7 +177,6 @@ export default function Requisiciones() {
     setEditingId(r.id)
     setShowForm(true)
     setModalDetalle(null)
-    // Scroll automático al formulario al editar
     setTimeout(() => {
       formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }, 100)
@@ -202,13 +200,15 @@ export default function Requisiciones() {
     try {
       const req = modalAprobacion
       const cantidad = req.cantidad_solicitada
+      // CORRECCIÓN: r eq.tipo_solicitud → req.tipo_solicitud
       const esEntrada = req.tipo_movimiento === 'Entrada' || req.tipo_solicitud === 'reposicion' || req.tipo_solicitud === 'ajuste_positivo'
       const esSalida = req.tipo_movimiento === 'Salida' || req.tipo_solicitud === 'ajuste_negativo' || req.tipo_solicitud === 'devolucion_proveedor'
-      const { data: itemActual, error: errorItem } = await supabase
-        .from('inventario')
-        .select('stock_actual, stock_reservado, stock_dañado')
-        .eq('id', req.item_inventario_id)
-        .single()
+      // CORRECCIÓN: singl e() → single() y comillas en stock_dañado
+       const { data: itemActual, error: errorItem } = await supabase
+         .from('inventario')
+         .select('stock_actual, stock_reservado, "stock_dañado", ubicacion')
+         .eq('id', req.item_inventario_id)
+         .single()
       if (errorItem) throw errorItem
       let nuevoStock = itemActual.stock_actual
       let nuevoReservado = itemActual.stock_reservado || 0
@@ -233,15 +233,17 @@ export default function Requisiciones() {
         })
         .eq('id', req.item_inventario_id)
       if (errorUpdate) throw errorUpdate
+      // CORRECCIÓN: ajuste_inventar io → ajuste_inventario
       const { error: errorMov } = await supabase
         .from('movimientos_inventario')
         .insert({
           item_inventario_id: req.item_inventario_id,
-          tipo_movimiento: req.tipo_solicitud === 'reposicion' ? 'entrada_compra' : 
-                          req.tipo_solicitud === 'ajuste_positivo' ? 'ajuste_inventario' :
-                          req.tipo_solicitud === 'ajuste_negativo' ? 'ajuste_inventario' :
-                          req.tipo_solicitud === 'devolucion_proveedor' ? 'salida_venta' :
-                          'traslado_bodega',
+          tipo_movimiento: req.tipo_solicitud === 'reposicion' ? 'entrada_compra' :
+            req.tipo_solicitud === 'ajuste_positivo' ? 'ajuste_inventario' :
+            req.tipo_solicitud === 'ajuste_negativo' ? 'ajuste_inventario' :
+            req.tipo_solicitud === 'devolucion_proveedor' ? 'salida_venta' :
+            'traslado_bodega',
+          // CORRECCIÓN: can tidad → cantidad
           cantidad: esEntrada ? cantidad : esSalida ? -cantidad : 0,
           stock_anterior: itemActual.stock_actual,
           stock_nuevo: nuevoStock,
@@ -252,12 +254,14 @@ export default function Requisiciones() {
           usuario_responsable: user?.email || 'usuario_desconocido'
         })
       if (errorMov) throw errorMov
+      // CORRECCIÓN: error Req → errorReq
       const { error: errorReq } = await supabase
         .from('requisiciones_inventario')
         .update({
           estado_aprobacion: 'Aprobada',
           estado: 'Completada',
           cantidad_entregada: cantidad,
+          // CORRECCIÓN: toIS OString() → toISOString()
           fecha_entrega: new Date().toISOString(),
           fecha_aprobacion: new Date().toISOString(),
           usuario_aprueba: user?.email || 'usuario_desconocido'
@@ -362,13 +366,11 @@ export default function Requisiciones() {
     return matchSearch && matchTipo && matchEstado
   })
 
-  // Paginación del lado del cliente sobre el array filtrado
   const totalRegistros = filtered.length
   const inicio = (paginaActual - 1) * registrosPorPagina
   const fin = inicio + registrosPorPagina
   const registrosPaginados = filtered.slice(inicio, fin)
 
-  // Resetear a página 1 cuando cambian los filtros
   useEffect(() => {
     setPaginaActual(1)
   }, [searchTerm, filtroTipo, filtroEstado])

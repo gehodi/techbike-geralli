@@ -337,7 +337,11 @@ export default function Inventario() {
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-1">
                   Stock Actual *
-                  {editingId && <Lock className="w-3 h-3 text-amber-600" title="Bloqueado en edición" />}
+                  {editingId && (
+                    <span title="Bloqueado en edición">
+                      <Lock className="w-3 h-3 text-amber-600" />
+                    </span>
+                  )}
                 </label>
                 <input
                   type="number"
@@ -360,7 +364,11 @@ export default function Inventario() {
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1 flex items-center gap-1">
                   Stock Mínimo
-                  {editingId && <Lock className="w-3 h-3 text-amber-600" title="Bloqueado en edición" />}
+                  {editingId && (
+                    <span title="Bloqueado en edición">
+                      <Lock className="w-3 h-3 text-amber-600" />
+                    </span>
+                 )}
                 </label>
                 <input
                   type="number"

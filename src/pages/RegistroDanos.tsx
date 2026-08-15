@@ -39,7 +39,6 @@ export default function RegistroDanos() {
   const [searchTerm, setSearchTerm] = useState('')
   const [filtroCausa, setFiltroCausa] = useState('')
   const [modalDetalle, setModalDetalle] = useState<RegistroDano | null>(null)
-
   const [formData, setFormData] = useState({
     item_inventario_id: '',
     cantidad: '',
@@ -59,13 +58,11 @@ export default function RegistroDanos() {
         .from('inventario_dañado')
         .select('*')
         .order('fecha_damno', { ascending: false })
-      
       if (error) {
         console.error('Error cargando registros:', error)
         toast.error('Error al cargar registros: ' + error.message)
         return
       }
-      
       const enriquecidos = await Promise.all(
         (data || []).map(async (r: any) => {
           const { data: itemData } = await supabase
@@ -73,7 +70,6 @@ export default function RegistroDanos() {
             .select('nombre, codigo')
             .eq('id', r.item_inventario_id)
             .single()
-          
           return {
             ...r,
             item_nombre: itemData?.nombre || 'Item eliminado',
@@ -81,7 +77,6 @@ export default function RegistroDanos() {
           }
         })
       )
-      
       setRegistros(enriquecidos)
     } catch (error: any) {
       console.error('Error:', error)
@@ -93,9 +88,10 @@ export default function RegistroDanos() {
 
   async function fetchInventario() {
     try {
+      // CORRECCIÓN: Comillas dobles en stock_dañado
       const { data } = await supabase
         .from('inventario')
-        .select('id, nombre, codigo, stock_actual, stock_reservado, stock_dañado, precio_compra')
+        .select('id, nombre, codigo, stock_actual, stock_reservado, "stock_dañado", precio_compra')
         .order('nombre')
       setInventario(data || [])
     } catch (error: any) {
@@ -111,22 +107,17 @@ export default function RegistroDanos() {
         toast.error('Seleccione un item válido')
         return
       }
-
       const cantidad = parseInt(formData.cantidad)
       if (cantidad <= 0) {
         toast.error('La cantidad debe ser mayor a cero')
         return
       }
-
       const stockDisponible = item.stock_actual - (item.stock_reservado || 0)
       if (cantidad > stockDisponible) {
         toast.error(`Stock insuficiente. Disponible: ${stockDisponible}`)
         return
       }
-
       const valorPerdida = cantidad * (item.precio_compra || 0)
-
-      // 1. Insertar registro de daño
       const { data: registro, error: errorRegistro } = await supabase
         .from('inventario_dañado')
         .insert([{
@@ -141,13 +132,9 @@ export default function RegistroDanos() {
         }])
         .select()
         .single()
-      
       if (errorRegistro) throw errorRegistro
-
-      // 2. Actualizar inventario
       const nuevoStockActual = item.stock_actual - cantidad
       const nuevoStockDanado = (item.stock_dañado || 0) + cantidad
-      
       const { error: errorUpdate } = await supabase
         .from('inventario')
         .update({
@@ -156,10 +143,7 @@ export default function RegistroDanos() {
           estado: nuevoStockActual === 0 ? 'agotado' : 'disponible'
         })
         .eq('id', item.id)
-      
       if (errorUpdate) throw errorUpdate
-
-      // 3. Registrar movimiento
       const { error: errorMov } = await supabase
         .from('movimientos_inventario')
         .insert({
@@ -175,14 +159,11 @@ export default function RegistroDanos() {
           fecha_movimiento: new Date().toISOString(),
           usuario_responsable: user?.email || 'usuario_desconocido'
         })
-      
       if (errorMov) throw errorMov
-
       toast.success(`Daño registrado. Pérdida: ${formatCurrency(valorPerdida)}`)
       resetForm()
       fetchRegistros()
       fetchInventario()
-      
     } catch (error: any) {
       console.error('Error al registrar:', error)
       toast.error('Error al registrar: ' + error.message)
@@ -234,13 +215,13 @@ export default function RegistroDanos() {
 
   const filtered = registros.filter(r => {
     const matchSearch = r.item_nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                       (r.item_codigo || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                       (r.descripcion || '').toLowerCase().includes(searchTerm.toLowerCase())
+      (r.item_codigo || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (r.descripcion || '').toLowerCase().includes(searchTerm.toLowerCase())
     const matchCausa = !filtroCausa || r.causa === filtroCausa
     return matchSearch && matchCausa
   })
 
-  const formatDate = (d: string) => d ? new Date(d).toLocaleString('es-CO', { 
+  const formatDate = (d: string) => d ? new Date(d).toLocaleString('es-CO', {
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit'
   }) : '-'
@@ -250,10 +231,8 @@ export default function RegistroDanos() {
     return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(v)
   }
 
-  // Calcular totales
   const totalPerdidas = registros.reduce((sum, r) => sum + (r.valor_perdida || 0), 0)
   const totalItemsDanados = registros.reduce((sum, r) => sum + r.cantidad, 0)
-  
   const perdidasEsteMes = registros
     .filter(r => {
       const fecha = new Date(r.fecha_damno)
@@ -274,7 +253,6 @@ export default function RegistroDanos() {
         </button>
       </div>
 
-      {/* Indicadores */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
           <div className="flex items-center gap-3">
