@@ -52,8 +52,8 @@ export const generarCotizacionPDF = async (cotizacion: any, detalle: any[]) => {
       body: servicios.map(s => [
         s.nombre,
         s.cantidad,
-        `$${s.precio_unitario.toLocaleString('es-CO')}`,
-        `$${s.subtotal.toLocaleString('es-CO')}`
+        `$${Number(s.precio_unitario).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        `$${Number(s.subtotal).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
       ]),
       theme: 'striped',
       headStyles: { fillColor: [59, 130, 246] }
@@ -69,8 +69,8 @@ export const generarCotizacionPDF = async (cotizacion: any, detalle: any[]) => {
       body: repuestos.map(r => [
         r.nombre,
         r.cantidad,
-        `$${r.precio_unitario.toLocaleString('es-CO')}`,
-        `$${r.subtotal.toLocaleString('es-CO')}`
+        `$${Number(r.precio_unitario).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        `$${Number(r.subtotal).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
       ]),
       theme: 'striped',
       headStyles: { fillColor: [34, 197, 94] }
@@ -78,17 +78,17 @@ export const generarCotizacionPDF = async (cotizacion: any, detalle: any[]) => {
     startY = getLastAutoTableFinalY(doc) + 10
   }
 
-  const totalServicios = servicios.reduce((sum, s) => sum + s.subtotal, 0)
-  const totalRepuestos = repuestos.reduce((sum, r) => sum + r.subtotal, 0)
+  const totalServicios = servicios.reduce((sum, s) => sum + Number(s.subtotal), 0)
+  const totalRepuestos = repuestos.reduce((sum, r) => sum + Number(r.subtotal), 0)
   const granTotal = totalServicios + totalRepuestos
 
   doc.setFontSize(11)
   doc.setFont('helvetica', 'normal')
-  doc.text(`Total Servicios: $${totalServicios.toLocaleString('es-CO')}`, 140, startY)
-  doc.text(`Total Repuestos: $${totalRepuestos.toLocaleString('es-CO')}`, 140, startY + 7)
+  doc.text(`Total Servicios: $${totalServicios.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 140, startY)
+  doc.text(`Total Repuestos: $${totalRepuestos.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 140, startY + 7)
   doc.setFontSize(13)
   doc.setFont('helvetica', 'bold')
-  doc.text(`TOTAL: $${granTotal.toLocaleString('es-CO')}`, 140, startY + 15)
+  doc.text(`TOTAL: $${granTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 140, startY + 15)
 
   if (cotizacion.notas) {
     doc.setFontSize(10)
@@ -112,7 +112,7 @@ export const generarOrdenesPorEstadoPDF = (ordenes: any[], estado: string) => {
     o.bicicleta_info,
     o.mecanico_nombre,
     new Date(o.fecha_ingreso).toLocaleDateString('es-CO'),
-    `$${(o.costo_estimado || 0).toLocaleString('es-CO')}`
+    `$${Number(o.costo_estimado || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   ])
 
   autoTable(doc, {
@@ -123,10 +123,10 @@ export const generarOrdenesPorEstadoPDF = (ordenes: any[], estado: string) => {
     headStyles: { fillColor: [59, 130, 246] }
   })
 
-  const total = ordenes.reduce((sum, o) => sum + (o.costo_estimado || 0), 0)
+  const total = ordenes.reduce((sum, o) => sum + Number(o.costo_estimado || 0), 0)
   doc.setFontSize(12)
   doc.setFont('helvetica', 'bold')
-  doc.text(`Total Órdenes: ${ordenes.length} | Valor Total: $${total.toLocaleString('es-CO')}`, 14, getLastAutoTableFinalY(doc) + 15)
+  doc.text(`Total Órdenes: ${ordenes.length} | Valor Total: $${total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 14, getLastAutoTableFinalY(doc) + 15)
   agregarPiePagina(doc)
   doc.save(`Ordenes_${estado}.pdf`)
 }
@@ -145,8 +145,8 @@ export const generarComparacionPDF = (orden: any, _cotizacion: any, detalleOrden
     itemOrden.descripcion,
     itemOrden.tipo === 'servicio' ? 'Servicio' : 'Repuesto',
     itemOrden.cantidad,
-    `$${(itemOrden.precio_unitario || 0).toLocaleString('es-CO')}`,
-    `$${(itemOrden.subtotal || 0).toLocaleString('es-CO')}`,
+    `$${Number(itemOrden.precio_unitario || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+    `$${Number(itemOrden.subtotal || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
     '✓'
   ])
 
@@ -158,15 +158,15 @@ export const generarComparacionPDF = (orden: any, _cotizacion: any, detalleOrden
     headStyles: { fillColor: [59, 130, 246] }
   })
 
-  const totalReal = detalleOrden.reduce((sum: number, d: any) => sum + (d.subtotal || 0), 0)
+  const totalReal = detalleOrden.reduce((sum: number, d: any) => sum + Number(d.subtotal || 0), 0)
   const startY = getLastAutoTableFinalY(doc) + 15
   doc.setFontSize(11)
   doc.setFont('helvetica', 'normal')
-  doc.text(`Total Real: $${totalReal.toLocaleString('es-CO')}`, 14, startY)
+  doc.text(`Total Real: $${totalReal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 14, startY)
   doc.setFontSize(12)
   doc.setFont('helvetica', 'bold')
   doc.setTextColor(30, 41, 59)
-  doc.text(`GRAN TOTAL: $${totalReal.toLocaleString('es-CO')}`, 14, startY + 15)
+  doc.text(`GRAN TOTAL: $${totalReal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 14, startY + 15)
 
   agregarPiePagina(doc)
   doc.save(`Comparacion_Orden_${orden.id}.pdf`)
@@ -178,8 +178,8 @@ export const generarInventarioPDF = (inventario: any[]) => {
   agregarEncabezado(doc, 'INVENTARIO DE REPUESTOS Y MATERIALES', `Total Items: ${inventario.length}`)
 
   const body = inventario.map(i => {
-    const disponible = i.stock_actual - (i.stock_reservado || 0)
-    const estado = disponible <= 0 ? 'Agotado' : disponible <= i.stock_minimo ? 'Stock Bajo' : 'Disponible'
+    const disponible = Number(i.stock_actual) - (Number(i.stock_reservado) || 0)
+    const estado = disponible <= 0 ? 'Agotado' : disponible <= Number(i.stock_minimo) ? 'Stock Bajo' : 'Disponible'
     return [
       i.codigo || '-',
       i.nombre,
@@ -189,7 +189,7 @@ export const generarInventarioPDF = (inventario: any[]) => {
       i.stock_reservado || 0,
       disponible,
       estado,
-      `$${(i.precio_venta || 0).toLocaleString('es-CO')}`
+      `$${Number(i.precio_venta || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     ]
   })
 
@@ -227,7 +227,7 @@ export const generarOrdenesPorMecanicoPDF = (ordenes: any[], mecanico: string, f
     o.estado,
     new Date(o.fecha_ingreso).toLocaleDateString('es-CO'),
     o.fecha_entrega_real ? new Date(o.fecha_entrega_real).toLocaleDateString('es-CO') : 'Pendiente',
-    `$${(o.costo_real || 0).toLocaleString('es-CO')}`
+    `$${Number(o.costo_real || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   ])
 
   autoTable(doc, {
@@ -239,10 +239,10 @@ export const generarOrdenesPorMecanicoPDF = (ordenes: any[], mecanico: string, f
   })
 
   const completadas = ordenes.filter(o => o.estado === 'Completada').length
-  const totalIngresos = ordenes.reduce((sum, o) => sum + (o.costo_real || 0), 0)
+  const totalIngresos = ordenes.reduce((sum, o) => sum + Number(o.costo_real || 0), 0)
   doc.setFontSize(11)
   doc.setFont('helvetica', 'bold')
-  doc.text(`Total Órdenes: ${ordenes.length} | Completadas: ${completadas} | Ingresos: $${totalIngresos.toLocaleString('es-CO')}`, 14, getLastAutoTableFinalY(doc) + 15)
+  doc.text(`Total Órdenes: ${ordenes.length} | Completadas: ${completadas} | Ingresos: $${totalIngresos.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 14, getLastAutoTableFinalY(doc) + 15)
   agregarPiePagina(doc)
   doc.save(`Ordenes_Mecanico_${mecanico.replace(/\s/g, '_')}.pdf`)
 }
@@ -260,17 +260,17 @@ export const generarIngresosPDF = (ordenes: any[], fechaInicio: string, fechaFin
   let totalRepuestos = 0
 
   const body = ordenes.map(o => {
-    const servicios = o.total_servicios || 0
-    const repuestos = o.total_repuestos || 0
+    const servicios = Number(o.total_servicios || 0)
+    const repuestos = Number(o.total_repuestos || 0)
     totalServicios += servicios
     totalRepuestos += repuestos
     return [
       o.numero_orden,
       o.cliente_nombre,
       new Date(o.fecha_entrega_real).toLocaleDateString('es-CO'),
-      `$${servicios.toLocaleString('es-CO')}`,
-      `$${repuestos.toLocaleString('es-CO')}`,
-      `$${(o.costo_real || 0).toLocaleString('es-CO')}`
+      `$${servicios.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      `$${repuestos.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      `$${Number(o.costo_real || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     ]
   })
 
@@ -287,12 +287,12 @@ export const generarIngresosPDF = (ordenes: any[], fechaInicio: string, fechaFin
 
   doc.setFontSize(11)
   doc.setFont('helvetica', 'normal')
-  doc.text(`Total Servicios: $${totalServicios.toLocaleString('es-CO')}`, 14, startY)
-  doc.text(`Total Repuestos: $${totalRepuestos.toLocaleString('es-CO')}`, 14, startY + 7)
+  doc.text(`Total Servicios: $${totalServicios.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 14, startY)
+  doc.text(`Total Repuestos: $${totalRepuestos.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 14, startY + 7)
   doc.setFontSize(13)
   doc.setFont('helvetica', 'bold')
   doc.setTextColor(30, 41, 59)
-  doc.text(`INGRESO TOTAL: $${granTotal.toLocaleString('es-CO')}`, 14, startY + 17)
+  doc.text(`INGRESO TOTAL: $${granTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 14, startY + 17)
   doc.setFontSize(10)
   doc.setFont('helvetica', 'normal')
   doc.setTextColor(100, 116, 139)
@@ -300,4 +300,141 @@ export const generarIngresosPDF = (ordenes: any[], fechaInicio: string, fechaFin
 
   agregarPiePagina(doc)
   doc.save(`Ingresos_${fechaInicio}_a_${fechaFin}.pdf`)
+}
+
+// 7. DETALLE DE ORDEN COMPLETADA PDF (NUEVA FUNCIÓN)
+export const generarDetalleOrdenPDF = (orden: any, detalleOrden: any[], cotizacion: any) => {
+  const doc = new jsPDF()
+  
+  // Helper para formatear moneda en el PDF
+  const fmt = (v: any) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  
+  // Encabezado
+  doc.setFontSize(20)
+  doc.setTextColor(30, 41, 59)
+  doc.setFont('helvetica', 'bold')
+  doc.text(`ORDEN DE SERVICIO ${orden.numero_orden}`, 105, 20, { align: 'center' })
+  
+  doc.setFontSize(10)
+  doc.setTextColor(100, 116, 139)
+  doc.setFont('helvetica', 'normal')
+  doc.text(`Estado: COMPLETADA`, 105, 28, { align: 'center' })
+  
+  doc.setDrawColor(30, 41, 59)
+  doc.setLineWidth(1)
+  doc.line(10, 35, 200, 35)
+  
+  // Información general
+  doc.setFontSize(11)
+  doc.setTextColor(30, 41, 59)
+  doc.setFont('helvetica', 'bold')
+  doc.text('Información General', 14, 45)
+  
+  doc.setFont('helvetica', 'normal')
+  doc.text(`Cliente: ${orden.cliente_nombre}`, 14, 52)
+  doc.text(`Bicicleta: ${orden.bicicleta_info}`, 14, 59)
+  doc.text(`Mecánico: ${orden.mecanico_nombre}`, 14, 66)
+  doc.text(`Fecha Ingreso: ${new Date(orden.fecha_ingreso).toLocaleDateString('es-CO')}`, 14, 73)
+  doc.text(`Fecha Entrega: ${new Date(orden.fecha_entrega_real).toLocaleDateString('es-CO')}`, 14, 80)
+  
+  // Detalles técnicos
+  doc.setFont('helvetica', 'bold')
+  doc.text('Detalles del Servicio', 14, 90)
+  
+  doc.setFont('helvetica', 'normal')
+  doc.text(`Síntomas: ${orden.sintomas_cliente || '-'}`, 14, 97)
+  doc.text(`Diagnóstico: ${orden.diagnostico || '-'}`, 14, 104)
+  doc.text(`Trabajo Realizado: ${orden.trabajo_realizado || '-'}`, 14, 111)
+  
+  // Totales
+  doc.setFont('helvetica', 'bold')
+  doc.text('Resumen Financiero', 14, 121)
+  
+  doc.setFont('helvetica', 'normal')
+  doc.text(`Costo Estimado: $${fmt(orden.costo_estimado)}`, 14, 128)
+  doc.text(`Costo Real: $${fmt(orden.costo_real)}`, 14, 135)
+  
+  // Detalle de servicios y repuestos
+  const servicios = detalleOrden.filter((d: any) => d.tipo === 'servicio')
+  const repuestos = detalleOrden.filter((d: any) => d.tipo === 'repuesto')
+  
+  let startY = 145
+  
+  if (servicios.length > 0) {
+    doc.setFont('helvetica', 'bold')
+    doc.text('Servicios Técnicos', 14, startY)
+    startY += 5
+    
+    autoTable(doc, {
+      startY: startY,
+      head: [['Servicio', 'Cant.', 'P. Unit.', 'Subtotal']],
+      body: servicios.map((s: any) => [
+        s.descripcion,
+        Number(s.cantidad_usada) || Number(s.cantidad),
+        `$${fmt(s.precio_unitario)}`,
+        `$${fmt((Number(s.cantidad_usada) || Number(s.cantidad)) * Number(s.precio_unitario))}`
+      ]),
+      theme: 'striped',
+      headStyles: { fillColor: [59, 130, 246] }
+    })
+    
+    startY = (doc as any).lastAutoTable?.finalY ?? startY + 20
+  }
+  
+  if (repuestos.length > 0) {
+    doc.setFont('helvetica', 'bold')
+    doc.text('Repuestos y Materiales', 14, startY)
+    startY += 5
+    
+    autoTable(doc, {
+      startY: startY,
+      head: [['Repuesto', 'Usados', 'Dañados', 'P. Unit.', 'Subtotal']],
+      body: repuestos.map((r: any) => [
+        r.descripcion,
+        Number(r.cantidad_usada),
+        Number(r.cantidad_dañada),
+        `$${fmt(r.precio_unitario)}`,
+        `$${fmt(Number(r.cantidad_usada) * Number(r.precio_unitario))}`
+      ]),
+      theme: 'striped',
+      headStyles: { fillColor: [34, 197, 94] }
+    })
+    
+    startY = (doc as any).lastAutoTable?.finalY ?? startY + 20
+  }
+  
+  // Comparación con cotización si existe
+  if (cotizacion) {
+    doc.setFont('helvetica', 'bold')
+    doc.text('Comparación con Cotización', 14, startY)
+    startY += 5
+    
+    const totalServiciosCot = cotizacion.items
+      .filter((i: any) => i.tipo === 'servicio')
+      .reduce((sum: number, i: any) => sum + Number(i.subtotal), 0)
+    
+    const totalRepuestosCot = cotizacion.items
+      .filter((i: any) => i.tipo === 'repuesto')
+      .reduce((sum: number, i: any) => sum + Number(i.subtotal), 0)
+    
+    const totalServiciosOrd = servicios.reduce((sum: number, s: any) => sum + (Number(s.cantidad_usada) || Number(s.cantidad)) * Number(s.precio_unitario), 0)
+    const totalRepuestosOrd = repuestos.reduce((sum: number, r: any) => sum + Number(r.cantidad_usada) * Number(r.precio_unitario), 0)
+    
+    doc.setFont('helvetica', 'normal')
+    doc.text(`Cotización #${cotizacion.id}`, 14, startY)
+    doc.text(`Total Servicios: $${fmt(totalServiciosCot)}`, 14, startY + 7)
+    doc.text(`Total Repuestos: $${fmt(totalRepuestosCot)}`, 14, startY + 14)
+    doc.text(`TOTAL: $${fmt(cotizacion.total)}`, 14, startY + 21)
+    
+    doc.text(`Orden Ejecutada`, 110, startY)
+    doc.text(`Total Servicios: $${fmt(totalServiciosOrd)}`, 110, startY + 7)
+    doc.text(`Total Repuestos: $${fmt(totalRepuestosOrd)}`, 110, startY + 14)
+    doc.text(`TOTAL: $${fmt(orden.costo_real)}`, 110, startY + 21)
+    
+    startY += 35
+  }
+  
+  // Pie de página
+  agregarPiePagina(doc)
+  doc.save(`Orden_${orden.numero_orden}_Detalle.pdf`)
 }

@@ -25,7 +25,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.unsubscribe()
   }, [])
 
-  // NUEVA FUNCIÓN: signOut
+  // Función para cerrar sesión
   const signOut = async () => {
     const { error } = await supabase.auth.signOut()
     if (error) {
