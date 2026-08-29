@@ -39,18 +39,13 @@ export default function Inventario() {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [modalDetalle, setModalDetalle] = useState<Inventario | null>(null)
-
-  // Estados para paginación
   const [paginaActual, setPaginaActual] = useState(1)
   const [registrosPorPagina, setRegistrosPorPagina] = useState(25)
   const [totalRegistros, setTotalRegistros] = useState(0)
-
-  // Estados para manejo de foto
   const [fotoActual, setFotoActual] = useState<string | null>(null)
   const [fotoFile, setFotoFile] = useState<File | null>(null)
   const [fotoPreview, setFotoPreview] = useState<string | null>(null)
   const [uploadingFoto, setUploadingFoto] = useState(false)
-
   const [formData, setFormData] = useState({
     nombre: '', categoria_id: '', marca_id: '', proveedor_id: '', codigo: '',
     stock_actual: '', stock_minimo: '', precio_compra: '',
@@ -70,20 +65,15 @@ export default function Inventario() {
   async function fetchInventario() {
     try {
       setLoading(true)
-
-      // Consulta para contar total de registros (con filtro si hay búsqueda)
       let countQuery = supabase.from('inventario').select('*', { count: 'exact', head: true })
-      
       if (searchTerm) {
         const term = `%${searchTerm}%`
         countQuery = countQuery.or(`nombre.ilike.${term},codigo.ilike.${term}`)
       }
-
       const { count, error: countError } = await countQuery
       if (countError) throw countError
       setTotalRegistros(count || 0)
 
-      // Consulta paginada
       const from = (paginaActual - 1) * registrosPorPagina
       const to = from + registrosPorPagina - 1
 
@@ -102,7 +92,6 @@ export default function Inventario() {
       if (error) throw error
       setInventario(data || [])
 
-      // Resetear a página 1 si la página actual está vacía
       if (data && data.length === 0 && paginaActual > 1) {
         setPaginaActual(1)
       }
@@ -148,20 +137,16 @@ export default function Inventario() {
     try {
       const fileExt = file.name.split('.').pop()
       const fileName = `inventario/${inventarioId}/${Date.now()}.${fileExt}`
-
       const { error: uploadError } = await supabase.storage
         .from('fotos-bicicletas')
         .upload(fileName, file, {
           cacheControl: '3600',
           upsert: false
         })
-
       if (uploadError) throw uploadError
-
       const { data: { publicUrl } } = supabase.storage
         .from('fotos-bicicletas')
         .getPublicUrl(fileName)
-
       return publicUrl
     } catch (error: any) {
       toast.error('Error al subir foto: ' + error.message)
@@ -173,7 +158,6 @@ export default function Inventario() {
     e.preventDefault()
     try {
       let fotoUrl = fotoActual
-
       if (fotoFile) {
         setUploadingFoto(true)
         const nuevaUrl = await uploadFoto(fotoFile, editingId || 'nuevo')
@@ -182,7 +166,6 @@ export default function Inventario() {
           fotoUrl = nuevaUrl
         }
       }
-
       let data: any = {
         nombre: formData.nombre,
         categoria_id: formData.categoria_id ? parseInt(formData.categoria_id) : null,
@@ -195,12 +178,10 @@ export default function Inventario() {
         notas: formData.notas || null,
         foto_url: fotoUrl
       }
-
       if (!editingId) {
         data.stock_actual = parseInt(formData.stock_actual) || 0
         data.stock_minimo = parseInt(formData.stock_minimo) || 0
       }
-
       if (editingId) {
         const { error } = await supabase.from('inventario').update(data).eq('id', editingId)
         if (error) throw error
@@ -236,11 +217,9 @@ export default function Inventario() {
     setFotoActual(i.foto_url || null)
     setFotoPreview(i.foto_url || null)
     setFotoFile(null)
-
     setEditingId(i.id)
     setShowForm(true)
     setModalDetalle(null)
-
     setTimeout(() => {
       formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }, 100)
@@ -272,8 +251,13 @@ export default function Inventario() {
   const getNombreProveedor = (id: number | null) => proveedores.find(p => p.id === id)?.nombre || '-'
 
   const formatCurrency = (v: number | null | undefined) => {
-    if (v === null || v === undefined) return '$0'
-    return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(v)
+    if (v === null || v === undefined) return '$0.00'
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(v)
   }
 
   const getStockStatus = (item: Inventario) => {
@@ -368,7 +352,7 @@ export default function Inventario() {
                     <span title="Bloqueado en edición">
                       <Lock className="w-3 h-3 text-amber-600" />
                     </span>
-                 )}
+                  )}
                 </label>
                 <input
                   type="number"
@@ -390,7 +374,6 @@ export default function Inventario() {
               <div><label className="block text-sm font-medium text-slate-700 mb-1">Precio Compra</label><input type="number" step="0.01" value={formData.precio_compra} onChange={(e) => setFormData({...formData, precio_compra: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" /></div>
               <div><label className="block text-sm font-medium text-slate-700 mb-1">Precio Venta</label><input type="number" step="0.01" value={formData.precio_venta} onChange={(e) => setFormData({...formData, precio_venta: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" /></div>
             </div>
-            {/* SECCIÓN DE FOTO */}
             <div className="border-t border-slate-200 pt-4">
               <label className="block text-sm font-medium text-slate-700 mb-2">Foto del Item</label>
               <div className="flex items-center gap-4">
@@ -461,7 +444,7 @@ export default function Inventario() {
           value={searchTerm}
           onChange={(e) => {
             setSearchTerm(e.target.value)
-            setPaginaActual(1) // Resetear a página 1 al buscar
+            setPaginaActual(1)
           }}
           className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
         />
@@ -561,7 +544,6 @@ export default function Inventario() {
                 </table>
               </div>
             </div>
-            {/* Controles de Paginación */}
             <ControlesPaginacion
               paginaActual={paginaActual}
               totalRegistros={totalRegistros}

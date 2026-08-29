@@ -429,8 +429,13 @@ export default function Cotizaciones() {
   }
   const formatDate = (d: string) => d ? new Date(d).toLocaleDateString('es-CO') : '-'
   const formatCurrency = (v: number | null | undefined) => {
-    if (v === null || v === undefined) return '$0'
-    return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(v)
+    if (v === null || v === undefined) return '$0.00'
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(v)
   }
 
   function tablaDetalle(items: DetalleItem[], onEliminar: (id: string) => void, c: { bg: string; head: string; row: string; foot: string }, total: number) {

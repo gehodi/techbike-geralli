@@ -22,21 +22,16 @@ interface ReporteCard {
 export default function Reportes() {
   const [modalAbierto, setModalAbierto] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
-  
-  // Estados para filtros
   const [fechaInicio, setFechaInicio] = useState('')
   const [fechaFin, setFechaFin] = useState('')
   const [mecanicoId, setMecanicoId] = useState('')
   const [estadoOrden, setEstadoOrden] = useState('')
   const [cotizacionId, setCotizacionId] = useState('')
   const [ordenId, setOrdenId] = useState('')
-  
-  // Estados para datos de dropdowns
   const [cotizacionesDisponibles, setCotizacionesDisponibles] = useState<any[]>([])
   const [ordenesCompletadas, setOrdenesCompletadas] = useState<any[]>([])
   const [mecanicos, setMecanicos] = useState<any[]>([])
 
-  // Cargar datos para los dropdowns al abrir el modal
   useEffect(() => {
     if (modalAbierto !== null) {
       if (modalAbierto === 1) fetchCotizacionesPendientes()
@@ -48,13 +43,9 @@ export default function Reportes() {
   async function fetchCotizacionesPendientes() {
     const { data } = await supabase
       .from('cotizaciones')
-      .select(`id, fecha_cotizacion, total, solicitudes_servicio (
-        clientes (nombres, apellidos),
-        bicicletas (marca, modelo)
-      )`)
+      .select(`id, fecha_cotizacion, total, solicitudes_servicio ( clientes (nombres, apellidos), bicicletas (marca, modelo) )`)
       .eq('estado', 'Pendiente')
       .order('id', { ascending: false })
-    
     const procesadas = (data || []).map((c: any) => ({
       id: c.id,
       label: `#${c.id} - ${c.solicitudes_servicio?.clientes?.nombres || ''} ${c.solicitudes_servicio?.clientes?.apellidos || ''} - ${c.solicitudes_servicio?.bicicletas?.marca || ''} ${c.solicitudes_servicio?.bicicletas?.modelo || ''}`,
@@ -70,7 +61,6 @@ export default function Reportes() {
       .select(`id, numero_orden, clientes (nombres, apellidos), bicicletas (marca, modelo)`)
       .eq('estado', 'Completada')
       .order('id', { ascending: false })
-    
     const procesadas = (data || []).map((o: any) => ({
       id: o.id,
       label: `${o.numero_orden} - ${o.clientes?.nombres || ''} ${o.clientes?.apellidos || ''}`
@@ -169,6 +159,12 @@ export default function Reportes() {
     }
   }
 
+  // Helper para convertir valores numéricos de Supabase
+  const toNum = (v: any): number => {
+    if (v === null || v === undefined) return 0
+    return parseFloat(String(v)) || 0
+  }
+
   const generarCotizacionDesdeBD = async (id: number) => {
     const { data: cotizacion } = await supabase
       .from('cotizaciones')
@@ -179,13 +175,23 @@ export default function Reportes() {
       .from('detalle_cotizaciones')
       .select('*')
       .eq('cotizacion_id', id)
+
     if (cotizacion && detalle) {
+      // CORRECCIÓN: Convertir valores numéricos
+      const detalleConvertido = (detalle || []).map((d: any) => ({
+        ...d,
+        cantidad: toNum(d.cantidad),
+        precio_unitario: toNum(d.precio_unitario),
+        subtotal: toNum(d.subtotal)
+      }))
+
       const cotizacionProcesada = {
         ...cotizacion,
+        total: toNum(cotizacion.total),
         cliente_nombre: `${cotizacion.solicitudes_servicio?.clientes?.nombres || ''} ${cotizacion.solicitudes_servicio?.clientes?.apellidos || ''}`,
         bicicleta_info: `${cotizacion.solicitudes_servicio?.bicicletas?.marca || ''} ${cotizacion.solicitudes_servicio?.bicicletas?.modelo || ''}`
       }
-      generarCotizacionPDF(cotizacionProcesada, detalle)
+      generarCotizacionPDF(cotizacionProcesada, detalleConvertido)
       toast.success('Cotización generada correctamente')
     }
   }
@@ -196,8 +202,11 @@ export default function Reportes() {
       .select(`*, clientes (nombres, apellidos), bicicletas (marca, modelo), mecanicos (nombres, apellidos)`)
       .eq('estado', estado)
     if (ordenes) {
+      // CORRECCIÓN: Convertir valores numéricos
       const ordenesProcesadas = ordenes.map(o => ({
         ...o,
+        costo_estimado: toNum(o.costo_estimado),
+        costo_real: toNum(o.costo_real),
         cliente_nombre: `${o.clientes?.nombres || ''} ${o.clientes?.apellidos || ''}`,
         bicicleta_info: `${o.bicicletas?.marca || ''} ${o.bicicletas?.modelo || ''}`,
         mecanico_nombre: o.mecanicos ? `${o.mecanicos.nombres} ${o.mecanicos.apellidos}` : 'Sin asignar'
@@ -208,30 +217,38 @@ export default function Reportes() {
   }
 
   const generarComparacionDesdeBD = async (ordenIdParam: number) => {
-    // Cargar orden con todas las relaciones
     const { data: orden } = await supabase
       .from('ordenes_servicio')
       .select(`*, clientes (nombres, apellidos), bicicletas (marca, modelo), mecanicos (nombres, apellidos)`)
       .eq('id', ordenIdParam)
       .single()
-    
     const { data: detalleOrden } = await supabase
       .from('detalle_ordenes_servicio')
       .select('*')
       .eq('orden_id', ordenIdParam)
-    
+
     if (orden) {
+      // CORRECCIÓN: Convertir valores numéricos
+      const detalleOrdenConvertido = (detalleOrden || []).map((d: any) => ({
+        ...d,
+        cantidad: toNum(d.cantidad),
+        cantidad_usada: toNum(d.cantidad_usada),
+        cantidad_dañada: toNum(d.cantidad_dañada),
+        precio_unitario: toNum(d.precio_unitario),
+        subtotal: toNum(d.subtotal)
+      }))
+
       const ordenProcesada = {
         ...orden,
+        costo_estimado: toNum(orden.costo_estimado),
+        costo_real: toNum(orden.costo_real),
         cliente_nombre: `${orden.clientes?.nombres || ''} ${orden.clientes?.apellidos || ''}`,
         bicicleta_info: `${orden.bicicletas?.marca || ''} ${orden.bicicletas?.modelo || ''}`,
         mecanico_nombre: orden.mecanicos ? `${orden.mecanicos.nombres} ${orden.mecanicos.apellidos}` : 'Sin asignar'
       }
-      
-      // Cargar cotización si existe
+
       let cotizacionProcesada: any = null
       let detalleCotizacion: any[] = []
-      
       if (orden.cotizacion_id) {
         const { data: cotizacion } = await supabase
           .from('cotizaciones')
@@ -242,11 +259,16 @@ export default function Reportes() {
           .from('detalle_cotizaciones')
           .select('*')
           .eq('cotizacion_id', orden.cotizacion_id)
-        cotizacionProcesada = cotizacion
-        detalleCotizacion = detalleCot || []
+
+        cotizacionProcesada = cotizacion ? { ...cotizacion, total: toNum(cotizacion.total) } : null
+        detalleCotizacion = (detalleCot || []).map((d: any) => ({
+          ...d,
+          cantidad: toNum(d.cantidad),
+          precio_unitario: toNum(d.precio_unitario),
+          subtotal: toNum(d.subtotal)
+        }))
       }
-      
-      generarComparacionPDF(ordenProcesada, cotizacionProcesada, detalleOrden || [], detalleCotizacion)
+      generarComparacionPDF(ordenProcesada, cotizacionProcesada, detalleOrdenConvertido, detalleCotizacion)
       toast.success('Detalle de orden generado')
     }
   }
@@ -257,8 +279,14 @@ export default function Reportes() {
       .select(`*, categorias (nombre), marcas_inventario (nombre), proveedores (nombre)`)
       .order('nombre')
     if (inventario) {
+      // CORRECCIÓN: Convertir valores numéricos
       const inventarioProcesado = inventario.map(i => ({
         ...i,
+        stock_actual: toNum(i.stock_actual),
+        stock_reservado: toNum(i.stock_reservado),
+        stock_minimo: toNum(i.stock_minimo),
+        precio_compra: toNum(i.precio_compra),
+        precio_venta: toNum(i.precio_venta),
         categoria: i.categorias?.nombre || '-',
         marca: i.marcas_inventario?.nombre || '-'
       }))
@@ -280,8 +308,10 @@ export default function Reportes() {
       .gte('fecha_ingreso', inicio)
       .lte('fecha_ingreso', fin)
     if (ordenes && mecanico) {
+      // CORRECCIÓN: Convertir valores numéricos
       const ordenesProcesadas = ordenes.map(o => ({
         ...o,
+        costo_real: toNum(o.costo_real),
         cliente_nombre: `${o.clientes?.nombres || ''} ${o.clientes?.apellidos || ''}`,
         bicicleta_info: `${o.bicicletas?.marca || ''} ${o.bicicletas?.modelo || ''}`
       }))
@@ -299,11 +329,17 @@ export default function Reportes() {
       .gte('fecha_entrega_real', inicio)
       .lte('fecha_entrega_real', fin)
     if (ordenes) {
+      // CORRECCIÓN: Convertir valores numéricos y usar toNum en reduce
       const ordenesProcesadas = ordenes.map(o => {
-        const totalServicios = (o.detalle_ordenes_servicio || []).filter((d: any) => d.tipo === 'servicio').reduce((sum: number, d: any) => sum + (d.subtotal || 0), 0)
-        const totalRepuestos = (o.detalle_ordenes_servicio || []).filter((d: any) => d.tipo === 'repuesto').reduce((sum: number, d: any) => sum + (d.subtotal || 0), 0)
+        const totalServicios = (o.detalle_ordenes_servicio || [])
+          .filter((d: any) => d.tipo === 'servicio')
+          .reduce((sum: number, d: any) => sum + toNum(d.subtotal), 0)
+        const totalRepuestos = (o.detalle_ordenes_servicio || [])
+          .filter((d: any) => d.tipo === 'repuesto')
+          .reduce((sum: number, d: any) => sum + toNum(d.subtotal), 0)
         return {
           ...o,
+          costo_real: toNum(o.costo_real),
           cliente_nombre: `${o.clientes?.nombres || ''} ${o.clientes?.apellidos || ''}`,
           total_servicios: totalServicios,
           total_repuestos: totalRepuestos

@@ -21,7 +21,6 @@ export default function Servicios() {
   const [searchTerm, setSearchTerm] = useState('')
   const [modalDetalle, setModalDetalle] = useState<Servicio | null>(null)
   const formRef = useRef<HTMLDivElement>(null)
-
   const [formData, setFormData] = useState({
     nombre: '', descripcion: '', costo_mano_obra: '', precio_cliente: '', activo: true
   })
@@ -42,15 +41,12 @@ export default function Servicios() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-
     const costoMO = parseFloat(formData.costo_mano_obra) || 0
     const precioCliente = parseFloat(formData.precio_cliente) || 0
-
     if (precioCliente <= 0) {
       toast.error('El precio al cliente debe ser mayor a cero')
       return
     }
-
     try {
       const data = {
         nombre: formData.nombre.trim(),
@@ -59,7 +55,6 @@ export default function Servicios() {
         precio_cliente: precioCliente,
         activo: formData.activo
       }
-
       if (editingId) {
         const { error } = await supabase.from('servicios').update(data).eq('id', editingId)
         if (error) throw error
@@ -87,8 +82,6 @@ export default function Servicios() {
     setEditingId(s.id)
     setShowForm(true)
     setModalDetalle(null)
-
-    // Scroll al formulario
     setTimeout(() => {
       formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }, 100)
@@ -118,12 +111,12 @@ export default function Servicios() {
   )
 
   const formatCurrency = (v: number | null | undefined) => {
-    if (v === null || v === undefined) return '$0'
-    return new Intl.NumberFormat('es-CO', {
+    if (v === null || v === undefined) return '$0.00'
+    return new Intl.NumberFormat('en-US', {
       style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
     }).format(v)
   }
 
