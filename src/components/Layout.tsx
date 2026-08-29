@@ -56,21 +56,21 @@ export default function Layout() {
     }
   }
 
-const menuItems: MenuItem[] = [
-  { path: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { path: '/clientes', label: 'Clientes', icon: Users },
-  { path: '/bicicletas', label: 'Bicicletas', icon: Bike },
-  { path: '/mecanicos', label: 'Mecánicos', icon: Wrench },
-  { path: '/solicitudes', label: 'Solicitudes', icon: FileText },
-  { path: '/cotizaciones', label: 'Cotizaciones', icon: DollarSign },
-  { path: '/ordenes', label: 'Órdenes de Servicio', icon: ClipboardList },
-  { path: '/inventario', label: 'Inventario', icon: Package, badge: badges.stockBajo },
-  { path: '/requisiciones', label: 'Solicitudes de Inventario', icon: ClipboardList, badge: badges.reqPendientes },
-  { path: '/registro-danos', label: 'Registro de Daños', icon: AlertTriangle },
-  { path: '/historial-inventario', label: 'Historial Movimientos', icon: History },
-  { path: '/reportes', label: 'Reportes', icon: BarChart3 },  // ← MOVIDO AL FINAL
-]
-
+  // ✅ NUEVO ORDEN DEL MENÚ
+  const menuItems: MenuItem[] = [
+    { path: '/', label: 'Dashboard', icon: LayoutDashboard },
+    { path: '/clientes', label: 'Clientes', icon: Users },
+    { path: '/solicitudes', label: 'Solicitudes', icon: FileText },
+    { path: '/cotizaciones', label: 'Cotizaciones', icon: DollarSign },
+    { path: '/ordenes', label: 'Órdenes de Servicio', icon: ClipboardList },
+    { path: '/bicicletas', label: 'Bicicletas', icon: Bike },
+    { path: '/mecanicos', label: 'Mecánicos', icon: Wrench },
+    { path: '/inventario', label: 'Inventario', icon: Package, badge: badges.stockBajo },
+    { path: '/requisiciones', label: 'Solicitudes de Inventario', icon: ClipboardList, badge: badges.reqPendientes },
+    { path: '/registro-danos', label: 'Registro de Daños', icon: AlertTriangle },
+    { path: '/historial-inventario', label: 'Historial Movimientos', icon: History },
+    { path: '/reportes', label: 'Reportes', icon: BarChart3 },
+  ]
 
   const subMenuCatalogos: SubMenu = {
     label: 'Catálogos',
@@ -85,7 +85,7 @@ const menuItems: MenuItem[] = [
   }
 
   const isActive = (path: string) => location.pathname === path
-  const isSubMenuActive = () => 
+  const isSubMenuActive = () =>
     subMenuCatalogos.items.some(item => location.pathname === item.path)
 
   const handleMenuClick = () => {
@@ -106,7 +106,7 @@ const menuItems: MenuItem[] = [
         >
           {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
         </button>
-        <h1 className="text-lg font-bold text-slate-800">Taller de Bicicletas</h1>
+        <h1 className="text-lg font-bold text-slate-800">Taller Bike</h1>
         <button
           onClick={signOut}
           className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg"

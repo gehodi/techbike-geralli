@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-import { Plus, Edit, Trash2, Save, X, Search, Eye, CheckCircle, Wrench, Package, Camera, Lock } from 'lucide-react'
+import { Plus, Edit, Trash2, Save, X, Search, Eye, CheckCircle, Wrench, Package, Camera, Lock, FileDown } from 'lucide-react'
 import toast from 'react-hot-toast'
 import ModalDetalle from '../components/ModalDetalle'
 import ControlesPaginacion from '../components/ControlesPaginacion'
@@ -66,6 +66,8 @@ export default function Cotizaciones() {
   const [paginaActual, setPaginaActual] = useState(1)
   const [registrosPorPagina, setRegistrosPorPagina] = useState(25)
   const [totalRegistros, setTotalRegistros] = useState(0)
+  const [generandoPDF, setGenerandoPDF] = useState(false)
+  const contenidoRef = useRef<HTMLDivElement>(null)
   const [formData, setFormData] = useState({
     solicitud_id: '', fecha_cotizacion: '', fecha_entrega_estimada: '', notas: ''
   })
@@ -265,6 +267,152 @@ export default function Cotizaciones() {
   const totalRepuestos = detalleRepuestos.reduce((sum, i) => sum + i.subtotal, 0)
   const granTotal = totalServicios + totalRepuestos
 
+  // ✅ FUNCIÓN PARA GENERAR PDF DE COTIZACIÓN INDIVIDUAL
+  async function generarPDFCotizacionIndividual(cotizacionId: number) {
+    try {
+      const { data: cotData } = await supabase
+        .from('cotizaciones')
+        .select(`*, solicitudes_servicio ( clientes (nombres, apellidos), bicicletas (marca, modelo) )`)
+        .eq('id', cotizacionId)
+        .single()
+
+      if (!cotData) return
+
+      const { data: detalleData } = await supabase
+        .from('detalle_cotizaciones')
+        .select('*')
+        .eq('cotizacion_id', cotizacionId)
+
+      if (!detalleData) return
+
+      const serviciosDet = detalleData.filter((d: any) => d.tipo === 'servicio')
+      const repuestosDet = detalleData.filter((d: any) => d.tipo === 'repuesto')
+
+      const { default: jsPDF } = await import('jspdf')
+      const doc = new jsPDF()
+
+      const clienteNombre = cotData.solicitudes_servicio?.clientes
+        ? `${cotData.solicitudes_servicio.clientes.nombres} ${cotData.solicitudes_servicio.clientes.apellidos}`
+        : 'Sin cliente'
+      const bicicletaInfo = cotData.solicitudes_servicio?.bicicletas
+        ? `${cotData.solicitudes_servicio.bicicletas.marca} ${cotData.solicitudes_servicio.bicicletas.modelo}`
+        : 'Sin bicicleta'
+
+      doc.setFontSize(18)
+      doc.setTextColor(30, 41, 59)
+      doc.setFont('helvetica', 'bold')
+      doc.text('COTIZACIÓN DE SERVICIO', 105, 20, { align: 'center' })
+      
+      doc.setFontSize(12)
+      doc.text(`N° ${cotizacionId}`, 105, 28, { align: 'center' })
+      
+      doc.setDrawColor(30, 41, 59)
+      doc.setLineWidth(0.5)
+      doc.line(10, 33, 200, 33)
+
+      doc.setFontSize(10)
+      doc.setFont('helvetica', 'normal')
+      doc.setTextColor(50, 50, 50)
+      doc.text(`Cliente: ${clienteNombre}`, 14, 42)
+      doc.text(`Bicicleta: ${bicicletaInfo}`, 14, 48)
+      doc.text(`Fecha: ${new Date(cotData.fecha_cotizacion).toLocaleDateString('es-CO')}`, 14, 54)
+      if (cotData.fecha_entrega_estimada) {
+        doc.text(`Entrega estimada: ${new Date(cotData.fecha_entrega_estimada).toLocaleDateString('es-CO')}`, 14, 60)
+      }
+
+      let startY = 70
+
+      if (serviciosDet.length > 0) {
+        doc.setFontSize(11)
+        doc.setFont('helvetica', 'bold')
+        doc.setTextColor(30, 41, 59)
+        doc.text('SERVICIOS TÉCNICOS', 14, startY)
+        startY += 5
+
+        const { default: autoTable } = await import('jspdf-autotable')
+        autoTable(doc, {
+          startY: startY,
+          head: [['Servicio', 'Cant.', 'P. Unit.', 'Subtotal']],
+          body: serviciosDet.map((s: any) => [
+            s.descripcion || 'Servicio',
+            s.cantidad,
+            `$${Number(s.precio_unitario || 0).toFixed(2)}`,
+            `$${Number(s.subtotal || 0).toFixed(2)}`
+          ]),
+          theme: 'striped',
+          headStyles: { fillColor: [59, 130, 246], textColor: 255 },
+          styles: { fontSize: 9 }
+        })
+
+        startY = (doc as any).lastAutoTable?.finalY ?? startY + 20
+        startY += 8
+      }
+
+      if (repuestosDet.length > 0) {
+        doc.setFontSize(11)
+        doc.setFont('helvetica', 'bold')
+        doc.setTextColor(30, 41, 59)
+        doc.text('REPUESTOS Y MATERIALES', 14, startY)
+        startY += 5
+
+        const { default: autoTable } = await import('jspdf-autotable')
+        autoTable(doc, {
+          startY: startY,
+          head: [['Repuesto', 'Cant.', 'P. Unit.', 'Subtotal']],
+          body: repuestosDet.map((r: any) => [
+            r.descripcion || 'Repuesto',
+            r.cantidad,
+            `$${Number(r.precio_unitario || 0).toFixed(2)}`,
+            `$${Number(r.subtotal || 0).toFixed(2)}`
+          ]),
+          theme: 'striped',
+          headStyles: { fillColor: [34, 197, 94], textColor: 255 },
+          styles: { fontSize: 9 }
+        })
+
+        startY = (doc as any).lastAutoTable?.finalY ?? startY + 20
+        startY += 8
+      }
+
+      const totalServ = serviciosDet.reduce((sum: number, s: any) => sum + Number(s.subtotal || 0), 0)
+      const totalRep = repuestosDet.reduce((sum: number, r: any) => sum + Number(r.subtotal || 0), 0)
+      const granTotal = totalServ + totalRep
+
+      doc.setFontSize(10)
+      doc.setFont('helvetica', 'normal')
+      doc.setTextColor(50, 50, 50)
+      doc.text(`Total Servicios: $${totalServ.toFixed(2)}`, 140, startY)
+      doc.text(`Total Repuestos: $${totalRep.toFixed(2)}`, 140, startY + 6)
+      
+      doc.setFontSize(12)
+      doc.setFont('helvetica', 'bold')
+      doc.setTextColor(37, 99, 235)
+      doc.text(`TOTAL: $${granTotal.toFixed(2)}`, 140, startY + 14)
+
+      if (cotData.notas) {
+        startY += 25
+        doc.setFontSize(10)
+        doc.setFont('helvetica', 'bold')
+        doc.setTextColor(30, 41, 59)
+        doc.text('Notas:', 14, startY)
+        doc.setFont('helvetica', 'normal')
+        doc.setTextColor(50, 50, 50)
+        const notasLines = doc.splitTextToSize(cotData.notas, 180)
+        doc.text(notasLines, 14, startY + 6)
+      }
+
+      const fecha = new Date().toLocaleDateString('es-CO')
+      doc.setFontSize(8)
+      doc.setTextColor(100, 116, 139)
+      doc.text(`Generado el: ${fecha}`, 105, 285, { align: 'center' })
+      doc.text('Space Bike - Sistema de Gestión', 105, 290, { align: 'center' })
+
+      doc.save(`Cotizacion_${cotizacionId}.pdf`)
+    } catch (error: any) {
+      console.error('Error generando PDF individual:', error)
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     try {
@@ -297,6 +445,13 @@ export default function Cotizaciones() {
           descripcion: r.nombre, cantidad: r.cantidad, precio_unitario: r.precio_unitario, subtotal: r.subtotal
         })))
       }
+      
+      // ✅ GENERAR PDF AUTOMÁTICAMENTE DESPUÉS DE GUARDAR/ACTUALIZAR
+      if (cotizacionId) {
+        toast.success('Generando PDF automáticamente...')
+        await generarPDFCotizacionIndividual(cotizacionId)
+      }
+
       if (!editingId) {
         resetForm(); fetchCotizaciones(); fetchSolicitudesDisponibles()
       } else {
@@ -419,6 +574,58 @@ export default function Cotizaciones() {
     setNuevoServicio({ servicio_id: '', cantidad: '1' }); setNuevoRepuesto({ item_id: '', cantidad: '1' })
   }
 
+  async function handleGenerarPDF() {
+    if (!contenidoRef.current) {
+      toast.error('No se puede capturar el contenido')
+      return
+    }
+
+    setGenerandoPDF(true)
+    const toastId = toast.loading('Generando PDF...')
+
+    try {
+      const { toPng } = await import('html-to-image')
+      const dataUrl = await toPng(contenidoRef.current, {
+        quality: 1,
+        pixelRatio: 2,
+        backgroundColor: '#f8fafc',
+        cacheBust: true
+      })
+
+      const { default: jsPDF } = await import('jspdf')
+      const imgWidth = 210
+      const pdf = new jsPDF('p', 'mm', 'a4')
+
+      const img = new Image()
+      img.src = dataUrl
+
+      await new Promise((resolve) => {
+        img.onload = () => {
+          const ratio = Math.min(
+            (imgWidth - 20) / img.width,
+            277 / img.height
+          )
+          const finalWidth = img.width * ratio
+          const finalHeight = img.height * ratio
+          const x = (imgWidth - finalWidth) / 2
+
+          pdf.addImage(dataUrl, 'PNG', x, 10, finalWidth, finalHeight)
+          pdf.save(`Cotizaciones_${new Date().toISOString().split('T')[0]}.pdf`)
+          resolve(true)
+        }
+      })
+
+      toast.dismiss(toastId)
+      toast.success('PDF generado correctamente')
+    } catch (error: any) {
+      toast.dismiss(toastId)
+      console.error('Error detallado:', error)
+      toast.error('Error al generar PDF: ' + error.message)
+    } finally {
+      setGenerandoPDF(false)
+    }
+  }
+
   const getEstadoColor = (estado: string) => {
     switch (estado) {
       case 'Pendiente': return 'bg-yellow-100 text-yellow-800'
@@ -473,15 +680,34 @@ export default function Cotizaciones() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-8">
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Cotizaciones</h1>
           <p className="text-slate-500 mt-1">Gestión de cotizaciones de servicio</p>
         </div>
-        <button onClick={() => { resetForm(); setShowForm(!showForm) }} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700">
-          {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}{showForm ? 'Cancelar' : 'Nueva Cotización'}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={handleGenerarPDF}
+            disabled={generandoPDF}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {generandoPDF ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Generando...
+              </>
+            ) : (
+              <>
+                <FileDown className="w-4 h-4" />
+                Generar PDF
+              </>
+            )}
+          </button>
+          <button onClick={() => { resetForm(); setShowForm(!showForm) }} className="bg-blue-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-blue-700">
+            {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}{showForm ? 'Cancelar' : 'Nueva Cotización'}
+          </button>
+        </div>
       </div>
 
       {showForm && (
@@ -548,76 +774,82 @@ export default function Cotizaciones() {
         </div>
       )}
 
-      <div className="relative">
-        <Search className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
-        <input type="text" placeholder="Buscar por ID, notas o estado..." value={searchTerm} onChange={(e) => { setSearchTerm(e.target.value); setPaginaActual(1) }} className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
-      </div>
+      {/* Contenido que se capturará en el PDF del listado */}
+      <div ref={contenidoRef} className="bg-slate-50 p-6 rounded-lg">
+        <div className="relative">
+          <Search className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+          <input type="text" placeholder="Buscar por ID, notas o estado..." value={searchTerm} onChange={(e) => { setSearchTerm(e.target.value); setPaginaActual(1) }} className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+        </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        {loading ? (<div className="p-8 text-center text-slate-500">Cargando...</div>) : cotizaciones.length === 0 ? (
-          <div className="p-8 text-center text-slate-500">{searchTerm ? 'No se encontraron cotizaciones' : 'No hay cotizaciones registradas'}</div>
-        ) : (
-          <>
-            <div className="overflow-x-auto">
-              <div className="min-w-[1100px]">
-                <table className="w-full">
-                  <thead className="bg-slate-50 border-b border-slate-200">
-                    <tr>
-                      <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">ID</th>
-                      <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Foto</th>
-                      <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Cliente</th>
-                      <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Bicicleta</th>
-                      <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Fecha</th>
-                      <th className="text-right px-6 py-3 text-sm font-medium text-slate-700">Total</th>
-                      <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Estado</th>
-                      <th className="sticky right-0 bg-slate-50 border-l-2 border-slate-200 px-6 py-3 text-sm font-medium text-slate-700 z-10 shadow-[-4px_0_6px_-1px_rgba(0,0,0,0.05)]">Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {cotizaciones.map((c) => (
-                      <tr key={c.id} className="hover:bg-slate-50 cursor-pointer group" onClick={() => setModalDetalle(c)}>
-                        <td className="px-6 py-4 text-sm font-mono text-slate-600">#{c.id}</td>
-                        <td className="px-6 py-4">
-                          {c.bicicleta_foto ? (
-                            <img src={c.bicicleta_foto} alt="Foto bicicleta" className="h-12 w-12 object-cover rounded-lg border border-slate-200 cursor-pointer hover:scale-110 transition-transform" onClick={(e) => { e.stopPropagation(); window.open(c.bicicleta_foto, '_blank') }} />
-                          ) : (
-                            <div className="h-12 w-12 bg-slate-100 rounded-lg border border-slate-200 flex items-center justify-center"><Camera className="w-5 h-5 text-slate-400" /></div>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 text-sm font-medium text-slate-900">{c.cliente_nombre}</td>
-                        <td className="px-6 py-4 text-sm text-slate-600">{c.bicicleta_info}</td>
-                        <td className="px-6 py-4 text-sm text-slate-600">{formatDate(c.fecha_cotizacion)}</td>
-                        <td className="px-6 py-4 text-sm text-right font-medium">{formatCurrency(c.total)}</td>
-                        <td className="px-6 py-4"><span className={`px-2 py-1 rounded-full text-xs font-medium ${getEstadoColor(c.estado)}`}>{c.estado}</span></td>
-                        <td className="sticky right-0 bg-white group-hover:bg-slate-50 border-l-2 border-slate-200 px-6 py-4 text-right z-10 shadow-[-4px_0_6px_-1px_rgba(0,0,0,0.05)]" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex justify-end gap-2">
-                            <button onClick={() => setModalDetalle(c)} className="p-2 text-slate-600 hover:bg-slate-100 rounded" title="Ver detalle"><Eye className="w-4 h-4" /></button>
-                            {c.estado !== 'Aprobada' && (
-                              <button onClick={() => handleAprobarCotizacion(c)} className="p-2 text-green-600 hover:bg-green-50 rounded" title="Aprobar y generar orden"><CheckCircle className="w-4 h-4" /></button>
-                            )}
-                            {c.estado !== 'Aprobada' ? (
-                              <button onClick={() => handleEdit(c)} className="p-2 text-blue-600 hover:bg-blue-50 rounded" title="Editar"><Edit className="w-4 h-4" /></button>
-                            ) : (
-                              <span className="p-2 text-slate-400" title="Cotización aprobada - No editable"><Lock className="w-4 h-4" /></span>
-                            )}
-                            <button onClick={() => handleDelete(c.id)} className="p-2 text-red-600 hover:bg-red-50 rounded" title="Eliminar"><Trash2 className="w-4 h-4" /></button>
-                          </div>
-                        </td>
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mt-4">
+          {loading ? (<div className="p-8 text-center text-slate-500">Cargando...</div>) : cotizaciones.length === 0 ? (
+            <div className="p-8 text-center text-slate-500">{searchTerm ? 'No se encontraron cotizaciones' : 'No hay cotizaciones registradas'}</div>
+          ) : (
+            <>
+              {/* ✅ CORRECCIÓN: Contenedor con overflow-x-auto para sticky */}
+              <div className="overflow-x-auto">
+                <div className="min-w-[1100px]">
+                  <table className="w-full">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                      <tr>
+                        <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">ID</th>
+                        <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Foto</th>
+                        <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Cliente</th>
+                        <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Bicicleta</th>
+                        <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Fecha</th>
+                        <th className="text-right px-6 py-3 text-sm font-medium text-slate-700">Total</th>
+                        <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Estado</th>
+                        {/* ✅ CORRECCIÓN: Sticky con position sticky explícito */}
+                        <th className="sticky right-0 bg-slate-50 border-l-2 border-slate-200 px-6 py-3 text-sm font-medium text-slate-700 z-10 shadow-[-4px_0_6px_-1px_rgba(0,0,0,0.05)]" style={{ position: 'sticky', right: 0 }}>Acciones</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200">
+                      {cotizaciones.map((c) => (
+                        <tr key={c.id} className="hover:bg-slate-50 cursor-pointer group" onClick={() => setModalDetalle(c)}>
+                          <td className="px-6 py-4 text-sm font-mono text-slate-600">#{c.id}</td>
+                          <td className="px-6 py-4">
+                            {c.bicicleta_foto ? (
+                              <img src={c.bicicleta_foto} alt="Foto bicicleta" className="h-12 w-12 object-cover rounded-lg border border-slate-200 cursor-pointer hover:scale-110 transition-transform" onClick={(e) => { e.stopPropagation(); window.open(c.bicicleta_foto, '_blank') }} />
+                            ) : (
+                              <div className="h-12 w-12 bg-slate-100 rounded-lg border border-slate-200 flex items-center justify-center"><Camera className="w-5 h-5 text-slate-400" /></div>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 text-sm font-medium text-slate-900">{c.cliente_nombre}</td>
+                          <td className="px-6 py-4 text-sm text-slate-600">{c.bicicleta_info}</td>
+                          <td className="px-6 py-4 text-sm text-slate-600">{formatDate(c.fecha_cotizacion)}</td>
+                          <td className="px-6 py-4 text-sm text-right font-medium">{formatCurrency(c.total)}</td>
+                          <td className="px-6 py-4"><span className={`px-2 py-1 rounded-full text-xs font-medium ${getEstadoColor(c.estado)}`}>{c.estado}</span></td>
+                          {/* ✅ CORRECCIÓN: Sticky con position sticky explícito */}
+                          <td className="sticky right-0 bg-white group-hover:bg-slate-50 border-l-2 border-slate-200 px-6 py-4 text-right z-10 shadow-[-4px_0_6px_-1px_rgba(0,0,0,0.05)]" style={{ position: 'sticky', right: 0 }} onClick={(e) => e.stopPropagation()}>
+                            <div className="flex justify-end gap-2">
+                              <button onClick={() => setModalDetalle(c)} className="p-2 text-slate-600 hover:bg-slate-100 rounded" title="Ver detalle"><Eye className="w-4 h-4" /></button>
+                              {c.estado !== 'Aprobada' && (
+                                <button onClick={() => handleAprobarCotizacion(c)} className="p-2 text-green-600 hover:bg-green-50 rounded" title="Aprobar y generar orden"><CheckCircle className="w-4 h-4" /></button>
+                              )}
+                              {c.estado !== 'Aprobada' ? (
+                                <button onClick={() => handleEdit(c)} className="p-2 text-blue-600 hover:bg-blue-50 rounded" title="Editar"><Edit className="w-4 h-4" /></button>
+                              ) : (
+                                <span className="p-2 text-slate-400" title="Cotización aprobada - No editable"><Lock className="w-4 h-4" /></span>
+                              )}
+                              <button onClick={() => handleDelete(c.id)} className="p-2 text-red-600 hover:bg-red-50 rounded" title="Eliminar"><Trash2 className="w-4 h-4" /></button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
-            <ControlesPaginacion
-              paginaActual={paginaActual}
-              totalRegistros={totalRegistros}
-              registrosPorPagina={registrosPorPagina}
-              onPageChange={setPaginaActual}
-              onRegistrosPorPaginaChange={(cantidad) => { setRegistrosPorPagina(cantidad); setPaginaActual(1) }}
-            />
-          </>
-        )}
+              <ControlesPaginacion
+                paginaActual={paginaActual}
+                totalRegistros={totalRegistros}
+                registrosPorPagina={registrosPorPagina}
+                onPageChange={setPaginaActual}
+                onRegistrosPorPaginaChange={(cantidad) => { setRegistrosPorPagina(cantidad); setPaginaActual(1) }}
+              />
+            </>
+          )}
+        </div>
       </div>
 
       {modalDetalle && (
