@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { Users, ClipboardList, Package, DollarSign, TrendingUp, AlertTriangle, Clock } from 'lucide-react'
+import { Users, ClipboardList, Package, DollarSign, TrendingUp, AlertTriangle, Clock, Shield, Bike, Wrench } from 'lucide-react'
 import AlertasStock from '../components/AlertasStock'
 
 interface Stats {
@@ -10,6 +10,7 @@ interface Stats {
   stockBajo: number
   ingresosMes: number
   solicitudesPendientes: number
+  garantiasPorVencer: number
 }
 
 interface OrdenReciente {
@@ -21,6 +22,16 @@ interface OrdenReciente {
   costo_estimado: number
 }
 
+interface GarantiaPorVencer {
+  id: string
+  bicicleta_codigo: string
+  bicicleta_info: string
+  cliente_nombre: string
+  cliente_telefono: string
+  fecha_fin: string
+  dias_restantes: number
+}
+
 export default function Dashboard() {
   const navigate = useNavigate()
   const [stats, setStats] = useState<Stats>({
@@ -28,14 +39,17 @@ export default function Dashboard() {
     ordenesPendientes: 0,
     stockBajo: 0,
     ingresosMes: 0,
-    solicitudesPendientes: 0
+    solicitudesPendientes: 0,
+    garantiasPorVencer: 0
   })
   const [ordenesRecientes, setOrdenesRecientes] = useState<OrdenReciente[]>([])
+  const [garantiasPorVencer, setGarantiasPorVencer] = useState<GarantiaPorVencer[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     fetchStats()
     fetchOrdenesRecientes()
+    fetchGarantiasPorVencer()
   }, [])
 
   async function fetchStats() {
@@ -56,7 +70,6 @@ export default function Dashboard() {
         .from('inventario')
         .select('stock_actual, stock_reservado, stock_minimo')
         .eq('estado', 'disponible')
-      
       const stockBajo = (inventario || []).filter((i: any) => 
         (i.stock_actual - (i.stock_reservado || 0)) <= i.stock_minimo
       ).length
@@ -69,7 +82,6 @@ export default function Dashboard() {
         .select('costo_real')
         .eq('estado', 'Completada')
         .gte('fecha_entrega_real', primerDiaMes)
-      
       const ingresosMes = (ordenesMes || []).reduce((sum: number, o: any) => sum + (o.costo_real || 0), 0)
 
       // Solicitudes de inventario pendientes
@@ -78,12 +90,26 @@ export default function Dashboard() {
         .select('*', { count: 'exact', head: true })
         .eq('estado_aprobacion', 'Pendiente')
 
+      // ✅ NUEVO: Garantías por vencer en 15 días
+      const hoy = new Date().toISOString().split('T')[0]
+      const fechaLimite = new Date()
+      fechaLimite.setDate(fechaLimite.getDate() + 15)
+      const fechaLimiteStr = fechaLimite.toISOString().split('T')[0]
+
+      const { count: garantiasPorVencer } = await supabase
+        .from('garantias')
+        .select('*', { count: 'exact', head: true })
+        .eq('estado', 'vigente')
+        .gte('fecha_fin', hoy)
+        .lte('fecha_fin', fechaLimiteStr)
+
       setStats({
         totalClientes: totalClientes || 0,
         ordenesPendientes: ordenesPendientes || 0,
         stockBajo,
         ingresosMes,
-        solicitudesPendientes: solicitudesPendientes || 0
+        solicitudesPendientes: solicitudesPendientes || 0,
+        garantiasPorVencer: garantiasPorVencer || 0
       })
     } catch (error: any) {
       console.error('Error cargando stats:', error)
@@ -96,32 +122,71 @@ export default function Dashboard() {
     try {
       const { data, error } = await supabase
         .from('ordenes_servicio')
-        .select(`
-          id, numero_orden, estado, fecha_ingreso, costo_estimado,
-          clientes(nombres, apellidos)
-        `)
+        .select(`id, numero_orden, estado, fecha_ingreso, costo_estimado, clientes(nombres, apellidos)`)
         .order('fecha_ingreso', { ascending: false })
         .limit(5)
-      
+
       if (error) throw error
-      
       const procesadas = (data || []).map((o: any) => ({
         ...o,
         cliente_nombre: o.clientes ? `${o.clientes.nombres} ${o.clientes.apellidos}` : 'Sin cliente'
       }))
-      
       setOrdenesRecientes(procesadas)
     } catch (error: any) {
       console.error('Error cargando órdenes:', error)
     }
   }
 
+  async function fetchGarantiasPorVencer() {
+    try {
+      const hoy = new Date().toISOString().split('T')[0]
+      const fechaLimite = new Date()
+      fechaLimite.setDate(fechaLimite.getDate() + 15)
+      const fechaLimiteStr = fechaLimite.toISOString().split('T')[0]
+
+      const { data, error } = await supabase
+        .from('garantias')
+        .select(`
+          id,
+          fecha_fin,
+          cliente_nombre,
+          cliente_telefono,
+          bicicletas_adquiridas(codigo_inventario, marca, modelo)
+        `)
+        .eq('estado', 'vigente')
+        .gte('fecha_fin', hoy)
+        .lte('fecha_fin', fechaLimiteStr)
+        .order('fecha_fin', { ascending: true })
+        .limit(5)
+
+      if (error) throw error
+
+      const hoyDate = new Date()
+      hoyDate.setHours(0, 0, 0, 0)
+
+      const procesadas: GarantiaPorVencer[] = (data || []).map((g: any) => {
+        const fechaFin = new Date(g.fecha_fin)
+        const diffTime = fechaFin.getTime() - hoyDate.getTime()
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+
+        return {
+          ...g,
+          bicicleta_codigo: g.bicicletas_adquiridas?.codigo_inventario || '-',
+          bicicleta_info: `${g.bicicletas_adquiridas?.marca || ''} ${g.bicicletas_adquiridas?.modelo || ''}`.trim() || '-',
+          dias_restantes: diffDays
+        }
+      })
+
+      setGarantiasPorVencer(procesadas)
+    } catch (error: any) {
+      console.error('Error cargando garantías por vencer:', error)
+    }
+  }
+
   const formatCurrency = (v: number) => {
     return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(v)
   }
-
   const formatDate = (d: string) => d ? new Date(d).toLocaleDateString('es-CO') : '-'
-
   const getEstadoColor = (estado: string) => {
     switch(estado) {
       case 'Pendiente': return 'bg-yellow-100 text-yellow-800'
@@ -196,6 +261,53 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* ✅ NUEVA TARJETA: Garantías por Vencer */}
+      {stats.garantiasPorVencer > 0 && (
+        <div 
+          className="bg-amber-50 border-2 border-amber-300 rounded-xl shadow-sm p-6 cursor-pointer hover:shadow-md transition-shadow"
+          onClick={() => navigate('/garantias')}
+        >
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-amber-200 rounded-lg">
+                <Shield className="w-6 h-6 text-amber-700" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-amber-900">Garantías por Vencer</h3>
+                <p className="text-sm text-amber-700">Próximos 15 días</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-3xl font-bold text-amber-700">{stats.garantiasPorVencer}</div>
+              <div className="text-xs text-amber-600">requieren atención</div>
+            </div>
+          </div>
+
+          {/* Lista de garantías próximas a vencer */}
+          <div className="mt-4 space-y-2">
+            {garantiasPorVencer.slice(0, 3).map((g) => (
+              <div key={g.id} className="bg-white rounded-lg p-3 border border-amber-200 flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-slate-800">{g.bicicleta_codigo} - {g.bicicleta_info}</div>
+                  <div className="text-xs text-slate-600">{g.cliente_nombre} {g.cliente_telefono && `• ${g.cliente_telefono}`}</div>
+                </div>
+                <div className="text-right">
+                  <div className={`text-sm font-bold ${g.dias_restantes <= 7 ? 'text-red-600' : 'text-amber-700'}`}>
+                    {g.dias_restantes} {g.dias_restantes === 1 ? 'día' : 'días'}
+                  </div>
+                  <div className="text-xs text-slate-500">{formatDate(g.fecha_fin)}</div>
+                </div>
+              </div>
+            ))}
+            {garantiasPorVencer.length > 3 && (
+              <div className="text-center text-xs text-amber-700 pt-2">
+                + {garantiasPorVencer.length - 3} garantías más por vencer
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Panel de alertas y actividad */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Alertas de stock - ocupa 2 columnas */}
@@ -242,22 +354,30 @@ export default function Dashboard() {
       {/* Accesos rápidos */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
         <h3 className="font-semibold text-slate-800 mb-4">Accesos Rápidos</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
           <button onClick={() => navigate('/solicitudes')} className="p-4 bg-blue-50 hover:bg-blue-100 rounded-lg text-left transition-colors">
             <ClipboardList className="w-6 h-6 text-blue-600 mb-2" />
             <div className="font-medium text-slate-900 text-sm">Nueva Solicitud</div>
             <div className="text-xs text-slate-600 mt-1">Registro de cliente</div>
           </button>
+
           <button onClick={() => navigate('/cotizaciones')} className="p-4 bg-green-50 hover:bg-green-100 rounded-lg text-left transition-colors">
             <DollarSign className="w-6 h-6 text-green-600 mb-2" />
             <div className="font-medium text-slate-900 text-sm">Nueva Cotización</div>
             <div className="text-xs text-slate-600 mt-1">Presupuesto servicio</div>
           </button>
-          <button onClick={() => navigate('/inventario')} className="p-4 bg-purple-50 hover:bg-purple-100 rounded-lg text-left transition-colors">
+
+          <button onClick={() => navigate('/inventario')} className="p-4 bg-purple-50 hover:bg-purple-100 rounded-lg text-left transition-colors relative">
             <Package className="w-6 h-6 text-purple-600 mb-2" />
             <div className="font-medium text-slate-900 text-sm">Inventario</div>
             <div className="text-xs text-slate-600 mt-1">Gestión de stock</div>
+            {stats.stockBajo > 0 && (
+              <span className="absolute top-2 right-2 bg-red-600 text-white w-5 h-5 rounded-full text-xs flex items-center justify-center font-bold">
+                {stats.stockBajo}
+              </span>
+            )}
           </button>
+
           <button onClick={() => navigate('/requisiciones')} className="p-4 bg-orange-50 hover:bg-orange-100 rounded-lg text-left transition-colors relative">
             <AlertTriangle className="w-6 h-6 text-orange-600 mb-2" />
             <div className="font-medium text-slate-900 text-sm">Reposiciones</div>
@@ -267,6 +387,36 @@ export default function Dashboard() {
                 {stats.solicitudesPendientes}
               </span>
             )}
+          </button>
+
+          {/* ✅ NUEVOS: Accesos rápidos para Bicicletas Usadas */}
+          <button onClick={() => navigate('/bicicletas-usadas')} className="p-4 bg-cyan-50 hover:bg-cyan-100 rounded-lg text-left transition-colors">
+            <Bike className="w-6 h-6 text-cyan-600 mb-2" />
+            <div className="font-medium text-slate-900 text-sm">Adquirir Bicicleta</div>
+            <div className="text-xs text-slate-600 mt-1">Nueva adquisición</div>
+          </button>
+
+          <button onClick={() => navigate('/ventas-bicicletas')} className="p-4 bg-emerald-50 hover:bg-emerald-100 rounded-lg text-left transition-colors">
+            <DollarSign className="w-6 h-6 text-emerald-600 mb-2" />
+            <div className="font-medium text-slate-900 text-sm">Vender Bicicleta</div>
+            <div className="text-xs text-slate-600 mt-1">Registrar venta</div>
+          </button>
+
+          <button onClick={() => navigate('/garantias')} className="p-4 bg-amber-50 hover:bg-amber-100 rounded-lg text-left transition-colors relative">
+            <Shield className="w-6 h-6 text-amber-600 mb-2" />
+            <div className="font-medium text-slate-900 text-sm">Garantías</div>
+            <div className="text-xs text-slate-600 mt-1">Control de vigencias</div>
+            {stats.garantiasPorVencer > 0 && (
+              <span className="absolute top-2 right-2 bg-amber-600 text-white w-5 h-5 rounded-full text-xs flex items-center justify-center font-bold">
+                {stats.garantiasPorVencer}
+              </span>
+            )}
+          </button>
+
+          <button onClick={() => navigate('/reclamaciones-garantia')} className="p-4 bg-rose-50 hover:bg-rose-100 rounded-lg text-left transition-colors">
+            <Wrench className="w-6 h-6 text-rose-600 mb-2" />
+            <div className="font-medium text-slate-900 text-sm">Reclamaciones</div>
+            <div className="text-xs text-slate-600 mt-1">Gestión de fallas</div>
           </button>
         </div>
       </div>

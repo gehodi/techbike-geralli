@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 import {
   LayoutDashboard, Users, Bike, Wrench, FileText, DollarSign,
   ClipboardList, Package, ChevronDown, ChevronRight, LogOut, Menu, X,
-  Tag, Award, Truck, History, Hammer, AlertTriangle, BarChart3
+  Tag, Award, Truck, History, Hammer, AlertTriangle, BarChart3, Shield
 } from 'lucide-react'
 
 interface MenuItem {
@@ -26,7 +26,11 @@ export default function Layout() {
   const location = useLocation()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [catalogosOpen, setCatalogosOpen] = useState(true)
-  const [badges, setBadges] = useState({ stockBajo: 0, reqPendientes: 0 })
+  const [badges, setBadges] = useState({ 
+    stockBajo: 0, 
+    reqPendientes: 0,
+    garantiasPorVencer: 0 // ✅ NUEVO
+  })
 
   useEffect(() => {
     fetchBadges()
@@ -50,20 +54,41 @@ export default function Layout() {
         .select('*', { count: 'exact', head: true })
         .eq('estado_aprobacion', 'Pendiente')
 
-      setBadges({ stockBajo, reqPendientes: reqPendientes || 0 })
+      // ✅ Garantías por vencer en 15 días
+      const hoy = new Date().toISOString().split('T')[0]
+      const fechaLimite = new Date()
+      fechaLimite.setDate(fechaLimite.getDate() + 15)
+      const fechaLimiteStr = fechaLimite.toISOString().split('T')[0]
+
+      const { count: garantiasPorVencer } = await supabase
+        .from('garantias')
+        .select('*', { count: 'exact', head: true })
+        .eq('estado', 'vigente')
+        .gte('fecha_fin', hoy)
+        .lte('fecha_fin', fechaLimiteStr)
+
+      setBadges({ 
+        stockBajo, 
+        reqPendientes: reqPendientes || 0,
+        garantiasPorVencer: garantiasPorVencer || 0
+      })
     } catch (error) {
       console.error('Error cargando badges:', error)
     }
   }
 
-  // ✅ NUEVO ORDEN DEL MENÚ
   const menuItems: MenuItem[] = [
     { path: '/', label: 'Dashboard', icon: LayoutDashboard },
     { path: '/clientes', label: 'Clientes', icon: Users },
     { path: '/solicitudes', label: 'Solicitudes', icon: FileText },
     { path: '/cotizaciones', label: 'Cotizaciones', icon: DollarSign },
     { path: '/ordenes', label: 'Órdenes de Servicio', icon: ClipboardList },
+    { path: '/ordenes-internas', label: 'Órdenes Internas', icon: Wrench },
     { path: '/bicicletas', label: 'Bicicletas', icon: Bike },
+    { path: '/bicicletas-usadas', label: 'Adquisición Bicicletas', icon: Bike },
+    { path: '/ventas-bicicletas', label: 'Ventas Bicicletas', icon: DollarSign },
+    { path: '/garantias', label: 'Garantías', icon: Shield, badge: badges.garantiasPorVencer }, // ✅ Badge agregado
+    { path: '/reclamaciones-garantia', label: 'Reclamaciones', icon: AlertTriangle },
     { path: '/mecanicos', label: 'Mecánicos', icon: Wrench },
     { path: '/inventario', label: 'Inventario', icon: Package, badge: badges.stockBajo },
     { path: '/requisiciones', label: 'Solicitudes de Inventario', icon: ClipboardList, badge: badges.reqPendientes },
@@ -78,7 +103,8 @@ export default function Layout() {
     items: [
       { path: '/categorias', label: 'Categorías', icon: Tag },
       { path: '/marcas', label: 'Marcas', icon: Award },
-      { path: '/proveedores', label: 'Proveedores', icon: Truck },
+      { path: '/proveedores', label: 'Proveedores Taller', icon: Truck },
+      { path: '/proveedores-bicicletas-usadas', label: 'Proveedores Bic. Usadas', icon: Truck },
       { path: '/tipos-bicicletas', label: 'Tipos Bicicletas', icon: Bike },
       { path: '/servicios', label: 'Servicios Técnicos', icon: Hammer },
     ]
@@ -154,6 +180,8 @@ export default function Layout() {
                         <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
                           item.path === '/inventario' 
                             ? 'bg-red-600 text-white' 
+                            : item.path === '/garantias'
+                            ? 'bg-yellow-500 text-white'
                             : 'bg-blue-600 text-white'
                         }`}>
                           {item.badge}
@@ -183,6 +211,7 @@ export default function Layout() {
                       <ChevronRight className="w-4 h-4" />
                     )}
                   </button>
+
                   {catalogosOpen && (
                     <div className="ml-4 mt-1 space-y-1 border-l-2 border-slate-200 pl-3">
                       {subMenuCatalogos.items.map((item) => {
