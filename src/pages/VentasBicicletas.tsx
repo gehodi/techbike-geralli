@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { Plus, X, Search, Eye, DollarSign, Save, Trash2, Shield } from 'lucide-react'
+import { Plus, X, Search, Eye, DollarSign, Save, Trash2, Shield, Camera, ChevronDown } from 'lucide-react'
 import toast from 'react-hot-toast'
 import ModalDetalle from '../components/ModalDetalle'
 import ControlesPaginacion from '../components/ControlesPaginacion'
@@ -19,7 +19,7 @@ interface Venta {
   bicicleta_info: string
   bicicleta_codigo: string
   garantia_id?: string
-  costo_total_invertido?: number // ✅ AGREGADO
+  costo_total_invertido?: number
 }
 
 interface BicicletaDisponible {
@@ -29,6 +29,7 @@ interface BicicletaDisponible {
   modelo: string
   costo_compra: number
   precio_venta_sugerido: number
+  foto_url?: string | null
 }
 
 interface Pago {
@@ -40,6 +41,7 @@ interface Pago {
 
 export default function VentasBicicletas() {
   const navigate = useNavigate()
+  const selectorRef = useRef<HTMLDivElement>(null)
   const [ventas, setVentas] = useState<Venta[]>([])
   const [bicicletasDisponibles, setBicicletasDisponibles] = useState<BicicletaDisponible[]>([])
   const [loading, setLoading] = useState(true)
@@ -51,6 +53,7 @@ export default function VentasBicicletas() {
   const [totalRegistros, setTotalRegistros] = useState(0)
   const [procesando, setProcesando] = useState(false)
   const [selectedBiciId, setSelectedBiciId] = useState<string>('')
+  const [selectorAbierto, setSelectorAbierto] = useState(false)
   const [costosDesglose, setCostosDesglose] = useState({
     compra: 0, reparaciones: 0, gastos: 0, comision: 0, total: 0
   })
@@ -66,6 +69,17 @@ export default function VentasBicicletas() {
     if (selectedBiciId) calcularCostos(parseInt(selectedBiciId))
     else setCostosDesglose({ compra: 0, reparaciones: 0, gastos: 0, comision: 0, total: 0 })
   }, [selectedBiciId])
+
+  // Cerrar el selector al hacer clic fuera
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (selectorRef.current && !selectorRef.current.contains(e.target as Node)) {
+        setSelectorAbierto(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   async function fetchVentas() {
     try {
@@ -100,10 +114,11 @@ export default function VentasBicicletas() {
     }
   }
 
+  // ✅ CORREGIDO: Ahora también trae la foto de la bicicleta
   async function fetchBicicletasDisponibles() {
     const { data } = await supabase
       .from('bicicletas_adquiridas')
-      .select('id, codigo_inventario, marca, modelo, costo_compra, precio_venta_sugerido')
+      .select('id, codigo_inventario, marca, modelo, costo_compra, precio_venta_sugerido, foto_url')
       .eq('estado', 'disponible_venta')
       .order('codigo_inventario')
     setBicicletasDisponibles(data || [])
@@ -148,13 +163,13 @@ export default function VentasBicicletas() {
   const rentabilidad = precioVentaNum - costosDesglose.total
   const margen = costosDesglose.total > 0 ? (rentabilidad / costosDesglose.total) * 100 : 0
   const pagosCuadrados = Math.abs(totalPagos - precioVentaNum) < 0.01
+  const bicicletaSeleccionada = bicicletasDisponibles.find(b => b.id.toString() === selectedBiciId) || null
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!selectedBiciId) { toast.error('Selecciona una bicicleta'); return }
     if (precioVentaNum <= 0) { toast.error('El precio de venta debe ser mayor a 0'); return }
     if (!pagosCuadrados) { toast.error(`Los pagos no cuadran. Diferencia: $${(precioVentaNum - totalPagos).toFixed(2)}`); return }
-
     setProcesando(true)
     try {
       const { data: ventaData, error: errorVenta } = await supabase
@@ -177,7 +192,6 @@ export default function VentasBicicletas() {
         .select()
         .single()
       if (errorVenta) throw errorVenta
-
       const pagosToInsert = pagos.map(p => ({
         venta_id: ventaData.id,
         metodo_pago: p.metodo_pago,
@@ -186,7 +200,6 @@ export default function VentasBicicletas() {
       }))
       const { error: errorPagos } = await supabase.from('pagos_ventas').insert(pagosToInsert)
       if (errorPagos) throw errorPagos
-
       const { error: errorBici } = await supabase
         .from('bicicletas_adquiridas')
         .update({ 
@@ -196,7 +209,6 @@ export default function VentasBicicletas() {
         })
         .eq('id', parseInt(selectedBiciId))
       if (errorBici) throw errorBici
-
       if (ventaData.garantia_id) {
         toast.success(`¡Venta registrada! Garantía creada automáticamente`)
       } else {
@@ -215,6 +227,7 @@ export default function VentasBicicletas() {
   function resetForm() {
     setShowForm(false)
     setSelectedBiciId('')
+    setSelectorAbierto(false)
     setFormData({ nombre_cliente: '', documento_cliente: '', telefono_cliente: '', email_cliente: '', precio_venta: '', observaciones: '' })
     setPagos([{ id: '1', metodo_pago: 'efectivo', monto: 0, referencia: '' }])
     setCostosDesglose({ compra: 0, reparaciones: 0, gastos: 0, comision: 0, total: 0 })
@@ -243,26 +256,80 @@ export default function VentasBicicletas() {
               <button onClick={resetForm} className="text-slate-400 hover:text-slate-600"><X className="w-6 h-6" /></button>
             </div>
             <form onSubmit={handleSubmit} className="p-6 space-y-6">
+              {/* ✅ SELECTOR PERSONALIZADO CON FOTO */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Bicicleta a Vender *</label>
-                <select 
-                  value={selectedBiciId} 
-                  onChange={(e) => setSelectedBiciId(e.target.value)} 
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
-                  required
-                >
-                  <option value="">Seleccionar bicicleta disponible...</option>
-                  {bicicletasDisponibles.map(b => (
-                    <option key={b.id} value={b.id}>
-                      {b.codigo_inventario} - {b.marca} {b.modelo} (Sugerida: {formatCurrency(b.precio_venta_sugerido)})
-                    </option>
-                  ))}
-                </select>
+                <div ref={selectorRef} className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setSelectorAbierto(!selectorAbierto)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none bg-white flex items-center gap-3 text-left"
+                  >
+                    {bicicletaSeleccionada ? (
+                      <>
+                        {bicicletaSeleccionada.foto_url ? (
+                          <img src={bicicletaSeleccionada.foto_url} alt={bicicletaSeleccionada.codigo_inventario} className="w-10 h-10 object-cover rounded-lg border border-slate-200" />
+                        ) : (
+                          <div className="w-10 h-10 bg-slate-100 rounded-lg border border-slate-200 flex items-center justify-center shrink-0">
+                            <Camera className="w-4 h-4 text-slate-400" />
+                          </div>
+                        )}
+                        <span className="flex-1 text-sm text-slate-800">
+                          {bicicletaSeleccionada.codigo_inventario} - {bicicletaSeleccionada.marca} {bicicletaSeleccionada.modelo}
+                        </span>
+                        <span className="text-xs text-slate-500">Sugerida: {formatCurrency(bicicletaSeleccionada.precio_venta_sugerido)}</span>
+                      </>
+                    ) : (
+                      <span className="flex-1 text-sm text-slate-500">Seleccionar bicicleta disponible...</span>
+                    )}
+                    <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform shrink-0 ${selectorAbierto ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {selectorAbierto && (
+                    <div className="absolute z-20 mt-1 w-full bg-white border border-slate-300 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                      {bicicletasDisponibles.length === 0 ? (
+                        <div className="px-3 py-2 text-sm text-slate-500">No hay bicicletas disponibles para venta</div>
+                      ) : (
+                        bicicletasDisponibles.map(b => (
+                          <button
+                            type="button"
+                            key={b.id}
+                            onClick={() => { setSelectedBiciId(b.id.toString()); setSelectorAbierto(false) }}
+                            className={`w-full px-3 py-2 flex items-center gap-3 hover:bg-green-50 text-left border-b border-slate-100 last:border-0 ${
+                              selectedBiciId === b.id.toString() ? 'bg-green-50' : ''
+                            }`}
+                          >
+                            {b.foto_url ? (
+                              <img src={b.foto_url} alt={b.codigo_inventario} className="w-10 h-10 object-cover rounded-lg border border-slate-200 shrink-0" />
+                            ) : (
+                              <div className="w-10 h-10 bg-slate-100 rounded-lg border border-slate-200 flex items-center justify-center shrink-0">
+                                <Camera className="w-4 h-4 text-slate-400" />
+                              </div>
+                            )}
+                            <span className="flex-1 text-sm text-slate-800">
+                              {b.codigo_inventario} - {b.marca} {b.modelo}
+                            </span>
+                            <span className="text-xs text-slate-500">Sugerida: {formatCurrency(b.precio_venta_sugerido)}</span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {selectedBiciId && (
+              {selectedBiciId && bicicletaSeleccionada && (
                 <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
-                  <h3 className="text-sm font-semibold text-slate-700 mb-3"> Análisis de Costos y Rentabilidad</h3>
+                  <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-3">
+                    {bicicletaSeleccionada.foto_url ? (
+                      <img src={bicicletaSeleccionada.foto_url} alt={bicicletaSeleccionada.codigo_inventario} className="w-12 h-12 object-cover rounded-lg border border-slate-200" />
+                    ) : (
+                      <div className="w-12 h-12 bg-slate-100 rounded-lg border border-slate-200 flex items-center justify-center">
+                        <Camera className="w-5 h-5 text-slate-400" />
+                      </div>
+                    )}
+                    Análisis de Costos y Rentabilidad
+                  </h3>
                   <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
                     <div><span className="text-slate-500">Compra:</span><div className="font-medium">{formatCurrency(costosDesglose.compra)}</div></div>
                     <div><span className="text-slate-500">Reparaciones:</span><div className="font-medium">{formatCurrency(costosDesglose.reparaciones)}</div></div>
@@ -288,7 +355,6 @@ export default function VentasBicicletas() {
                   <label className="block text-sm font-medium text-slate-700 mb-1">Precio de Venta Final *</label>
                   <input type="number" step="0.01" value={formData.precio_venta} onChange={(e) => setFormData({...formData, precio_venta: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-lg font-bold text-green-700" required />
                 </div>
-
                 <h4 className="text-sm font-semibold text-slate-700 mb-2">Desglose de Pagos</h4>
                 {pagos.map((pago) => (
                   <div key={pago.id} className="flex gap-2 mb-2 items-end">
@@ -389,6 +455,7 @@ export default function VentasBicicletas() {
           </div>
         )}
       </div>
+
       <ControlesPaginacion paginaActual={paginaActual} totalRegistros={totalRegistros} registrosPorPagina={registrosPorPagina} onPageChange={setPaginaActual} onRegistrosPorPaginaChange={(c) => { setRegistrosPorPagina(c); setPaginaActual(1) }} />
 
       {modalDetalle && (

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { ArrowLeft, Package, Wrench, AlertTriangle, DollarSign, FileDown } from 'lucide-react'
+import { ArrowLeft, Package, Wrench, AlertTriangle, DollarSign, FileDown, Camera } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { toPng } from 'html-to-image'
 
@@ -10,6 +10,8 @@ interface OrdenDetalle {
   numero_orden: string
   cliente_nombre: string
   bicicleta_info: string
+  bicicleta_codigo?: string
+  bicicleta_foto?: string
   mecanico_nombre: string
   estado: string
   diagnostico: string
@@ -23,6 +25,7 @@ interface OrdenDetalle {
   sintomas_cliente: string
   trabajos_cotizados: string
   cotizacion_id: number
+  tipo_orden?: string
 }
 
 interface DetalleItem {
@@ -65,17 +68,44 @@ export default function DetalleOrdenCompletada() {
     try {
       const { data: ordenData, error: errorOrden } = await supabase
         .from('ordenes_servicio')
-        .select(`*, clientes(nombres, apellidos), bicicletas(marca, modelo), mecanicos(nombres, apellidos)`)
+        .select(`
+          *, 
+          clientes(nombres, apellidos), 
+          bicicletas(marca, modelo, numero_serie, foto_principal_url), 
+          bicicletas_adquiridas(codigo_inventario, marca, modelo, foto_url), 
+          mecanicos(nombres, apellidos)
+        `)
         .eq('id', ordenId)
         .single()
 
       if (errorOrden) throw errorOrden
 
+      const esInterna = ordenData.tipo_orden === 'interna_bicicleta_usada' || ordenData.tipo_orden === 'garantia'
+      const biciCliente = ordenData.bicicletas
+      const biciAdquirida = ordenData.bicicletas_adquiridas
+
+      let bicicletaInfo = ''
+      let bicicletaCodigo = ''
+      let bicicletaFoto = null
+
+      if (esInterna && biciAdquirida) {
+        bicicletaInfo = `${biciAdquirida.marca || ''} ${biciAdquirida.modelo || ''}`.trim() || 'Sin bicicleta'
+        bicicletaCodigo = biciAdquirida.codigo_inventario || ''
+        bicicletaFoto = biciAdquirida.foto_url || null
+      } else if (biciCliente) {
+        bicicletaInfo = `${biciCliente.marca || ''} ${biciCliente.modelo || ''}`.trim() || 'Sin bicicleta'
+        bicicletaFoto = biciCliente.foto_principal_url || null
+      }
+
       let costoEstimado = parseFloat(String(ordenData.costo_estimado)) || 0
       const ordenCompleta: OrdenDetalle = {
         ...ordenData,
-        cliente_nombre: `${ordenData.clientes?.nombres || ''} ${ordenData.clientes?.apellidos || ''}`.trim() || 'Sin cliente',
-        bicicleta_info: `${ordenData.bicicletas?.marca || ''} ${ordenData.bicicletas?.modelo || ''}`.trim() || 'Sin bicicleta',
+        cliente_nombre: esInterna 
+          ? 'Interna' 
+          : `${ordenData.clientes?.nombres || ''} ${ordenData.clientes?.apellidos || ''}`.trim() || 'Sin cliente',
+        bicicleta_info: bicicletaInfo,
+        bicicleta_codigo: bicicletaCodigo,
+        bicicleta_foto: bicicletaFoto,
         mecanico_nombre: ordenData.mecanicos ? `${ordenData.mecanicos.nombres} ${ordenData.mecanicos.apellidos}` : 'Sin asignar',
         costo_estimado: costoEstimado,
         costo_real: parseFloat(String(ordenData.costo_real)) || 0
@@ -167,10 +197,9 @@ export default function DetalleOrdenCompletada() {
       const { default: jsPDF } = await import('jspdf')
       const imgWidth = 210
       const pdf = new jsPDF('p', 'mm', 'a4')
-      
       const img = new Image()
       img.src = dataUrl
-      
+
       await new Promise((resolve) => {
         img.onload = () => {
           const ratio = Math.min(
@@ -180,7 +209,6 @@ export default function DetalleOrdenCompletada() {
           const finalWidth = img.width * ratio
           const finalHeight = img.height * ratio
           const x = (imgWidth - finalWidth) / 2
-          
           pdf.addImage(dataUrl, 'PNG', x, 10, finalWidth, finalHeight)
           pdf.save(`Orden_${orden?.numero_orden}_Detalle.pdf`)
           resolve(true)
@@ -198,7 +226,6 @@ export default function DetalleOrdenCompletada() {
   }
 
   const formatDate = (d: string) => d ? new Date(d).toLocaleDateString('es-CO') : '-'
-
   const formatCurrency = (v: number | null | undefined) => {
     if (v === null || v === undefined) return '$0.00'
     return new Intl.NumberFormat('en-US', {
@@ -211,6 +238,9 @@ export default function DetalleOrdenCompletada() {
 
   if (loading) return <div className="p-8 text-center text-slate-500">Cargando...</div>
   if (!orden) return <div className="p-8 text-center text-red-600">Orden no encontrada</div>
+
+  const esInterna = orden.tipo_orden === 'interna_bicicleta_usada' || orden.tipo_orden === 'garantia'
+  const mostrarComparacion = !esInterna && !!cotizacion
 
   const totalServiciosOrden = detalleOrden
     .filter(d => d.tipo === 'servicio')
@@ -228,13 +258,72 @@ export default function DetalleOrdenCompletada() {
     .filter(d => d.tipo === 'repuesto')
     .reduce((sum, d) => sum + d.subtotal, 0) || 0
 
+  // Tarjeta reutilizable "ORDEN EJECUTADA" (misma estructura en ambas vistas)
+  const ordenEjecutadaCard = (
+    <div className="border border-slate-200 rounded-lg p-4">
+      <h3 className="font-semibold text-slate-800 mb-4 text-center bg-green-50 p-2 rounded">ORDEN EJECUTADA</h3>
+      <div className="space-y-3 mb-4">
+        <h4 className="text-sm font-medium text-slate-700 flex items-center gap-2">
+          <Wrench className="w-4 h-4" /> Servicios
+        </h4>
+        {detalleOrden.filter(i => i.tipo === 'servicio').length === 0 ? (
+          <p className="text-xs text-slate-500 bg-slate-50 p-2 rounded">Sin servicios registrados</p>
+        ) : (
+          detalleOrden.filter(i => i.tipo === 'servicio').map((item) => (
+            <div key={item.id} className="flex justify-between text-sm bg-slate-50 p-2 rounded">
+              <div>
+                <div>{item.descripcion}</div>
+                <div className="text-xs text-slate-500">Usados: {item.cantidad_usada || item.cantidad}</div>
+              </div>
+              <span className="font-medium">
+                {formatCurrency((item.cantidad_usada || item.cantidad) * item.precio_unitario)}
+              </span>
+            </div>
+          ))
+        )}
+        <div className="border-t border-slate-200 pt-2 text-right font-semibold">
+          Total Servicios: {formatCurrency(totalServiciosOrden)}
+        </div>
+      </div>
+      <div className="space-y-3">
+        <h4 className="text-sm font-medium text-slate-700 flex items-center gap-2">
+          <Package className="w-4 h-4" /> Repuestos
+        </h4>
+        {detalleOrden.filter(i => i.tipo === 'repuesto').length === 0 ? (
+          <p className="text-xs text-slate-500 bg-slate-50 p-2 rounded">Sin repuestos registrados</p>
+        ) : (
+          detalleOrden.filter(i => i.tipo === 'repuesto').map((item) => (
+            <div key={item.id} className="flex justify-between text-sm bg-slate-50 p-2 rounded">
+              <div>
+                <div>{item.descripcion}</div>
+                <div className="text-xs text-slate-500">
+                  Usados: {item.cantidad_usada || 0} | 
+                  Dañados: {item.cantidad_dañada || 0} | 
+                  Reservados: {item.cantidad}
+                </div>
+              </div>
+              <span className="font-medium">
+                {formatCurrency((item.cantidad_usada || 0) * item.precio_unitario)}
+              </span>
+            </div>
+          ))
+        )}
+        <div className="border-t border-slate-200 pt-2 text-right font-semibold">
+          Total Repuestos: {formatCurrency(totalRepuestosOrden)}
+        </div>
+      </div>
+      <div className="mt-4 pt-4 border-t-2 border-green-200 text-right">
+        <div className="text-lg font-bold text-green-600">TOTAL: {formatCurrency(orden.costo_real)}</div>
+      </div>
+    </div>
+  )
+
   return (
     <div className="space-y-6 p-8">
       <div className="flex justify-between items-center mb-6">
         <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-slate-600 hover:text-slate-800">
           <ArrowLeft className="w-4 h-4" /> Volver
         </button>
-        
         <button
           onClick={handleGenerarPDF}
           disabled={generandoPDF}
@@ -264,6 +353,18 @@ export default function DetalleOrdenCompletada() {
                 <span>Ingreso: {formatDate(orden.fecha_ingreso)}</span>
                 <span>Entrega: {formatDate(orden.fecha_entrega_real)}</span>
               </div>
+              {orden.tipo_orden && (
+                <div className="mt-2">
+                  <span className={`px-2 py-1 rounded text-xs font-medium ${
+                    esInterna
+                      ? 'bg-purple-100 text-purple-800'
+                      : 'bg-blue-100 text-blue-800'
+                  }`}>
+                    {orden.tipo_orden === 'interna_bicicleta_usada' ? 'Interna' : 
+                     orden.tipo_orden === 'garantia' ? 'Garantía' : 'Cliente'}
+                  </span>
+                </div>
+              )}
             </div>
             <div className="text-right">
               <div className="text-sm text-slate-600">Costo Estimado</div>
@@ -275,10 +376,15 @@ export default function DetalleOrdenCompletada() {
 
           <div className="grid grid-cols-2 gap-6 mb-6">
             <div className="bg-slate-50 p-4 rounded-lg">
-              <h3 className="font-semibold text-slate-800 mb-2">Información del Cliente</h3>
+              <h3 className="font-semibold text-slate-800 mb-2">Información {esInterna ? 'de la Bicicleta' : 'del Cliente'}</h3>
               <div className="space-y-1 text-sm">
-                <div><span className="text-slate-600">Cliente:</span> <span className="font-medium">{orden.cliente_nombre}</span></div>
-                <div><span className="text-slate-600">Bicicleta:</span> <span className="font-medium">{orden.bicicleta_info}</span></div>
+                {!esInterna && (
+                  <div><span className="text-slate-600">Cliente:</span> <span className="font-medium">{orden.cliente_nombre}</span></div>
+                )}
+                <div><span className="text-slate-600">Bicicleta:</span> <span className="font-medium">
+                  {orden.bicicleta_codigo && <span className="font-mono">{orden.bicicleta_codigo} - </span>}
+                  {orden.bicicleta_info}
+                </span></div>
                 <div><span className="text-slate-600">Mecánico:</span> <span className="font-medium">{orden.mecanico_nombre}</span></div>
               </div>
             </div>
@@ -291,9 +397,25 @@ export default function DetalleOrdenCompletada() {
               </div>
             </div>
           </div>
+
+          {orden.bicicleta_foto && (
+            <div className="mb-6">
+              <h3 className="font-semibold text-slate-800 mb-2 flex items-center gap-2">
+                <Camera className="w-4 h-4" />
+                Foto de la Bicicleta
+              </h3>
+              <div className="bg-white p-4 rounded-lg border border-slate-200">
+                <img 
+                  src={orden.bicicleta_foto} 
+                  alt="Bicicleta" 
+                  className="max-w-md h-auto rounded-lg border border-slate-200"
+                />
+              </div>
+            </div>
+          )}
         </div>
 
-        {cotizacion && (
+        {mostrarComparacion && cotizacion ? (
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
             <h2 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
               <DollarSign className="w-5 h-5 text-blue-600" />
@@ -316,7 +438,6 @@ export default function DetalleOrdenCompletada() {
                     Total Servicios: {formatCurrency(totalServiciosCotizacion)}
                   </div>
                 </div>
-
                 <div className="space-y-3">
                   <h4 className="text-sm font-medium text-slate-700 flex items-center gap-2">
                     <Package className="w-4 h-4" /> Repuestos
@@ -331,64 +452,12 @@ export default function DetalleOrdenCompletada() {
                     Total Repuestos: {formatCurrency(totalRepuestosCotizacion)}
                   </div>
                 </div>
-
                 <div className="mt-4 pt-4 border-t-2 border-blue-200 text-right">
                   <div className="text-lg font-bold text-blue-600">TOTAL: {formatCurrency(cotizacion.total)}</div>
                 </div>
               </div>
-
-              <div className="border border-slate-200 rounded-lg p-4">
-                <h3 className="font-semibold text-slate-800 mb-4 text-center bg-green-50 p-2 rounded">ORDEN EJECUTADA</h3>
-                <div className="space-y-3 mb-4">
-                  <h4 className="text-sm font-medium text-slate-700 flex items-center gap-2">
-                    <Wrench className="w-4 h-4" /> Servicios
-                  </h4>
-                  {detalleOrden.filter(i => i.tipo === 'servicio').map((item) => (
-                    <div key={item.id} className="flex justify-between text-sm bg-slate-50 p-2 rounded">
-                      <div>
-                        <div>{item.descripcion}</div>
-                        <div className="text-xs text-slate-500">Usados: {item.cantidad_usada || item.cantidad}</div>
-                      </div>
-                      <span className="font-medium">
-                        {formatCurrency((item.cantidad_usada || item.cantidad) * item.precio_unitario)}
-                      </span>
-                    </div>
-                  ))}
-                  <div className="border-t border-slate-200 pt-2 text-right font-semibold">
-                    Total Servicios: {formatCurrency(totalServiciosOrden)}
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <h4 className="text-sm font-medium text-slate-700 flex items-center gap-2">
-                    <Package className="w-4 h-4" /> Repuestos
-                  </h4>
-                  {detalleOrden.filter(i => i.tipo === 'repuesto').map((item) => (
-                    <div key={item.id} className="flex justify-between text-sm bg-slate-50 p-2 rounded">
-                      <div>
-                        <div>{item.descripcion}</div>
-                        <div className="text-xs text-slate-500">
-                          Usados: {item.cantidad_usada || 0} | 
-                          Dañados: {item.cantidad_dañada || 0} | 
-                          Reservados: {item.cantidad}
-                        </div>
-                      </div>
-                      <span className="font-medium">
-                        {formatCurrency((item.cantidad_usada || 0) * item.precio_unitario)}
-                      </span>
-                    </div>
-                  ))}
-                  <div className="border-t border-slate-200 pt-2 text-right font-semibold">
-                    Total Repuestos: {formatCurrency(totalRepuestosOrden)}
-                  </div>
-                </div>
-
-                <div className="mt-4 pt-4 border-t-2 border-green-200 text-right">
-                  <div className="text-lg font-bold text-green-600">TOTAL: {formatCurrency(orden.costo_real)}</div>
-                </div>
-              </div>
+              {ordenEjecutadaCard}
             </div>
-
             <div className="mt-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">
               <div className="flex items-center gap-2 mb-2">
                 <AlertTriangle className="w-5 h-5 text-yellow-600" />
@@ -415,6 +484,14 @@ export default function DetalleOrdenCompletada() {
                 </div>
               </div>
             </div>
+          </div>
+        ) : (
+          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+            <h2 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
+              <Wrench className="w-5 h-5 text-green-600" />
+              Detalle de Ejecución del Servicio
+            </h2>
+            {ordenEjecutadaCard}
           </div>
         )}
       </div>

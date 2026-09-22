@@ -1,4 +1,3 @@
-import React from 'react'
 import { useAuth } from './contexts/AuthContext'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { Toaster } from 'react-hot-toast'
@@ -33,23 +32,27 @@ import ComprobanteVenta from './pages/ComprobanteVenta'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
-  if (loading) return <div className="min-h-screen flex items-center justify-center">Cargando sistema...</div>
-  if (!user) return <Navigate to="/login" />
-  return children
+  
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-100">
+        <div className="text-slate-600">Cargando sistema...</div>
+      </div>
+    )
+  }
+  
+  if (!user) return <Navigate to="/login" replace />
+  return <>{children}</>
 }
 
 function App() {
-  const { user } = useAuth()
+  const { user, loading } = useAuth()
 
-  if (!user) {
+  if (loading) {
     return (
-      <>
-        <Toaster position="top-right" />
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="*" element={<Navigate to="/login" />} />
-        </Routes>
-      </>
+      <div className="min-h-screen flex items-center justify-center bg-slate-100">
+        <div className="text-slate-600">Cargando sistema...</div>
+      </div>
     )
   }
 
@@ -74,6 +77,10 @@ function App() {
         }}
       />
       <Routes>
+        {/* Ruta pública de login */}
+        <Route path="/login" element={!user ? <Login /> : <Navigate to="/" replace />} />
+        
+        {/* Rutas protegidas dentro del Layout */}
         <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/clientes" element={<Clientes />} />
@@ -100,9 +107,13 @@ function App() {
           <Route path="/garantias" element={<Garantias />} />
           <Route path="/reclamaciones-garantia" element={<ReclamacionesGarantia />} />
         </Route>
+        
         {/* Rutas fuera del Layout para impresión limpia */}
         <Route path="/certificado-reacondicionamiento/:id" element={<CertificadoReacondicionamiento />} />
         <Route path="/comprobante-venta/:id" element={<ComprobanteVenta />} />
+        
+        {/* Ruta comodín - redirige al dashboard */}
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>
   )

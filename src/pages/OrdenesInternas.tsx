@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { Edit, X, Search, Eye, Package, Ban, Save, Plus, Wrench, CheckCircle, AlertTriangle, Lock, Shield } from 'lucide-react'
+import { Edit, X, Search, Eye, Package, Ban, Save, Plus, Wrench, CheckCircle, AlertTriangle, Lock, Camera, Shield } from 'lucide-react'
 import toast from 'react-hot-toast'
 import ModalDetalle from '../components/ModalDetalle'
 import ControlesPaginacion from '../components/ControlesPaginacion'
@@ -11,6 +12,7 @@ interface OrdenServicio {
   bicicleta_adquirida_id: number
   bicicleta_codigo: string
   bicicleta_info: string
+  bicicleta_foto?: string
   mecanico_id: number
   mecanico_nombre: string
   estado: string
@@ -51,6 +53,7 @@ interface Mecanico { id: number; nombres: string; apellidos: string }
 interface OrdenIndex { id: number; numero_orden: string; tipo_orden: string }
 
 export default function OrdenesInternas() {
+  const navigate = useNavigate()
   const formRef = useRef<HTMLDivElement>(null)
   const [ordenes, setOrdenes] = useState<OrdenServicio[]>([])
   const [ordenesIndex, setOrdenesIndex] = useState<OrdenIndex[]>([])
@@ -111,7 +114,7 @@ export default function OrdenesInternas() {
   async function fetchBicicletasUsadas() {
     const { data } = await supabase
       .from('bicicletas_adquiridas')
-      .select('id, codigo_inventario, marca, modelo')
+      .select('id, codigo_inventario, marca, modelo, foto_url')
       .in('estado', ['adquirida', 'en_reparacion'])
       .order('codigo_inventario')
     setBicicletasUsadas(data || [])
@@ -145,7 +148,7 @@ export default function OrdenesInternas() {
         .from('ordenes_servicio')
         .select(`
           *, 
-          bicicletas_adquiridas(codigo_inventario, marca, modelo), 
+          bicicletas_adquiridas(codigo_inventario, marca, modelo, foto_url), 
           mecanicos(nombres, apellidos),
           reclamaciones_garantia(id, numero_reclamacion, garantias(bicicletas_adquiridas(codigo_inventario, marca, modelo)))
         `)
@@ -168,6 +171,9 @@ export default function OrdenesInternas() {
           bicicleta_info: esGarantia
             ? (biciDesdeReclamacion ? `${biciDesdeReclamacion.marca} ${biciDesdeReclamacion.modelo}` : 'Garantía')
             : (biciDirecta ? `${biciDirecta.marca} ${biciDirecta.modelo}` : 'Sin bicicleta'),
+          bicicleta_foto: esGarantia
+            ? (biciDesdeReclamacion?.foto_url || null)
+            : (biciDirecta?.foto_url || null),
           mecanico_nombre: o.mecanicos ? `${o.mecanicos.nombres} ${o.mecanicos.apellidos}` : 'Sin asignar',
           numero_reclamacion: o.reclamaciones_garantia?.numero_reclamacion || null
         }
@@ -260,7 +266,7 @@ export default function OrdenesInternas() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     try {
-      const data = {
+      const data: any = {
         bicicleta_adquirida_id: formData.bicicleta_adquirida_id ? parseInt(formData.bicicleta_adquirida_id) : null,
         mecanico_id: formData.mecanico_id ? parseInt(formData.mecanico_id) : null,
         estado: formData.estado,
@@ -273,8 +279,12 @@ export default function OrdenesInternas() {
         fecha_entrega_real: formData.fecha_entrega_real || null,
         notas: formData.notas || null,
         tipo_orden: 'interna_bicicleta_usada',
-        precios_a_costo: true,
-        numero_orden: ''
+        precios_a_costo: true
+      }
+
+      // Solo en INSERT se envía vacío para que el trigger (ya corregido) genere el correlativo
+      if (!editingId) {
+        data.numero_orden = ''
       }
 
       let ordenId = editingId
@@ -513,20 +523,17 @@ export default function OrdenesInternas() {
 
         if (reclamacion?.garantia_id) {
           await supabase.from('garantias').update({ estado: 'reclamada' }).eq('id', reclamacion.garantia_id)
-
           const { data: garantia } = await supabase
             .from('garantias')
             .select('venta_id')
             .eq('id', reclamacion.garantia_id)
             .single()
-
           if (garantia?.venta_id) {
             const { data: venta } = await supabase
               .from('ventas')
               .select('rentabilidad_neta, costo_total_invertido')
               .eq('id', garantia.venta_id)
               .single()
-
             if (venta) {
               const nuevaRentabilidad = (venta.rentabilidad_neta || 0) - costoManoObra
               const nuevoCostoInvertido = (venta.costo_total_invertido || 0) + costoManoObra
@@ -804,11 +811,12 @@ export default function OrdenesInternas() {
         {loading ? (<div className="p-8 text-center text-slate-500">Cargando...</div>) : ordenes.length === 0 ? (<div className="p-8 text-center text-slate-500">{searchTerm ? 'No se encontraron órdenes' : 'No hay órdenes registradas'}</div>) : (
           <>
             <div className="overflow-x-auto">
-              <div className="min-w-[1100px]">
+              <div className="min-w-[1200px]">
                 <table className="w-full">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
                       <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Orden</th>
+                      <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Foto</th>
                       <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Tipo</th>
                       <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Bicicleta</th>
                       <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Mecánico</th>
@@ -825,6 +833,20 @@ export default function OrdenesInternas() {
                           {o.numero_orden}
                           {o.numero_reclamacion && <div className="text-xs text-purple-600 mt-1">Ref: {o.numero_reclamacion}</div>}
                         </td>
+                        <td className="px-6 py-4">
+                          {o.bicicleta_foto ? (
+                            <img 
+                              src={o.bicicleta_foto} 
+                              alt="Foto bicicleta" 
+                              className="h-12 w-12 object-cover rounded-lg border border-slate-200 cursor-pointer hover:scale-110 transition-transform" 
+                              onClick={(e) => { e.stopPropagation(); window.open(o.bicicleta_foto, '_blank') }} 
+                            />
+                          ) : (
+                            <div className="h-12 w-12 bg-slate-100 rounded-lg border border-slate-200 flex items-center justify-center">
+                              <Camera className="w-5 h-5 text-slate-400" />
+                            </div>
+                          )}
+                        </td>
                         <td className="px-6 py-4">{getTipoOrdenBadge(o.tipo_orden)}</td>
                         <td className="px-6 py-4 text-sm text-slate-600">{o.bicicleta_info}</td>
                         <td className="px-6 py-4 text-sm text-slate-600">{o.mecanico_nombre}</td>
@@ -834,7 +856,16 @@ export default function OrdenesInternas() {
                         <td className="sticky right-0 bg-white group-hover:bg-slate-50 border-l-2 border-slate-200 px-6 py-4 text-right z-10 shadow-[-4px_0_6px_-1px_rgba(0,0,0,0.05)]">
                           <div className="flex justify-end gap-2">
                             {o.estado === 'Completada' ? (
-                              <><span className="p-2 text-slate-400" title="Orden bloqueada"><Lock className="w-4 h-4" /></span></>
+                              <>
+                                <button 
+                                  onClick={() => navigate(`/orden-completada/${o.id}`)} 
+                                  className="p-2 text-green-600 hover:bg-green-50 rounded" 
+                                  title="Ver detalle completo"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </button>
+                                <span className="p-2 text-slate-400" title="Orden bloqueada"><Lock className="w-4 h-4" /></span>
+                              </>
                             ) : (
                               <>
                                 <button onClick={() => setModalDetalle(o)} className="p-2 text-slate-600 hover:bg-slate-100 rounded" title="Ver detalle"><Eye className="w-4 h-4" /></button>
@@ -866,6 +897,7 @@ export default function OrdenesInternas() {
         <ModalDetalle
           titulo={`Orden ${modalDetalle.numero_orden}`}
           campos={[
+            { label: 'Foto Bicicleta', value: modalDetalle.bicicleta_foto, tipo: 'imagen' },
             { label: 'Tipo de Orden', value: modalDetalle.tipo_orden === 'garantia' ? 'Garantía' : 'Interna (Reacondicionamiento)', tipo: 'estado' },
             { label: 'Bicicleta', value: `${modalDetalle.bicicleta_codigo} - ${modalDetalle.bicicleta_info}` },
             { label: 'Mecánico', value: modalDetalle.mecanico_nombre },

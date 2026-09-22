@@ -55,16 +55,38 @@ export default function Reportes() {
     setCotizacionesDisponibles(procesadas)
   }
 
+  // ✅ CORREGIDO: Incluir join con bicicletas_adquiridas
   async function fetchOrdenesCompletadas() {
     const { data } = await supabase
       .from('ordenes_servicio')
-      .select(`id, numero_orden, clientes (nombres, apellidos), bicicletas (marca, modelo)`)
+      .select(`
+        id, 
+        numero_orden, 
+        tipo_orden,
+        clientes (nombres, apellidos), 
+        bicicletas (marca, modelo),
+        bicicletas_adquiridas (codigo_inventario, marca, modelo)
+      `)
       .eq('estado', 'Completada')
       .order('id', { ascending: false })
-    const procesadas = (data || []).map((o: any) => ({
-      id: o.id,
-      label: `${o.numero_orden} - ${o.clientes?.nombres || ''} ${o.clientes?.apellidos || ''}`
-    }))
+    const procesadas = (data || []).map((o: any) => {
+      // Determinar bicicleta según tipo de orden
+      const esInterna = o.tipo_orden === 'interna_bicicleta_usada'
+      const bici = esInterna ? o.bicicletas_adquiridas : o.bicicletas
+      const biciLabel = bici 
+        ? `${bici.codigo_inventario ? bici.codigo_inventario + ' - ' : ''}${bici.marca || ''} ${bici.modelo || ''}`.trim()
+        : 'Sin bicicleta'
+      
+      const clienteLabel = o.clientes 
+        ? `${o.clientes.nombres || ''} ${o.clientes.apellidos || ''}`.trim()
+        : (esInterna ? 'Interna' : 'Sin cliente')
+      
+      return {
+        id: o.id,
+        label: `${o.numero_orden || 'S/N'} - ${clienteLabel} - ${biciLabel}`,
+        tipo_orden: o.tipo_orden
+      }
+    })
     setOrdenesCompletadas(procesadas)
   }
 
@@ -159,10 +181,31 @@ export default function Reportes() {
     }
   }
 
-  // Helper para convertir valores numéricos de Supabase
   const toNum = (v: any): number => {
     if (v === null || v === undefined) return 0
     return parseFloat(String(v)) || 0
+  }
+
+  // ✅ FUNCIÓN HELPER: Procesar orden para reportes (maneja ambos tipos)
+  const procesarOrdenParaReporte = (o: any) => {
+    const esInterna = o.tipo_orden === 'interna_bicicleta_usada' || o.tipo_orden === 'garantia'
+    const bici = esInterna ? o.bicicletas_adquiridas : o.bicicletas
+    const cliente = o.clientes
+    
+    return {
+      ...o,
+      costo_estimado: toNum(o.costo_estimado),
+      costo_real: toNum(o.costo_real),
+      tipo_orden: o.tipo_orden || 'cliente',
+      cliente_nombre: cliente 
+        ? `${cliente.nombres || ''} ${cliente.apellidos || ''}`.trim()
+        : (esInterna ? 'Interna' : 'Sin cliente'),
+      bicicleta_info: bici 
+        ? `${bici.codigo_inventario ? bici.codigo_inventario + ' - ' : ''}${bici.marca || ''} ${bici.modelo || ''}`.trim()
+        : 'Sin bicicleta',
+      bicicleta_codigo: bici?.codigo_inventario || '',
+      mecanico_nombre: o.mecanicos ? `${o.mecanicos.nombres} ${o.mecanicos.apellidos}` : 'Sin asignar'
+    }
   }
 
   const generarCotizacionDesdeBD = async (id: number) => {
@@ -175,16 +218,13 @@ export default function Reportes() {
       .from('detalle_cotizaciones')
       .select('*')
       .eq('cotizacion_id', id)
-
     if (cotizacion && detalle) {
-      // CORRECCIÓN: Convertir valores numéricos
       const detalleConvertido = (detalle || []).map((d: any) => ({
         ...d,
         cantidad: toNum(d.cantidad),
         precio_unitario: toNum(d.precio_unitario),
         subtotal: toNum(d.subtotal)
       }))
-
       const cotizacionProcesada = {
         ...cotizacion,
         total: toNum(cotizacion.total),
@@ -196,39 +236,43 @@ export default function Reportes() {
     }
   }
 
+  // ✅ CORREGIDO: Incluir join con bicicletas_adquiridas
   const generarOrdenesDesdeBD = async (estado: string) => {
     const { data: ordenes } = await supabase
       .from('ordenes_servicio')
-      .select(`*, clientes (nombres, apellidos), bicicletas (marca, modelo), mecanicos (nombres, apellidos)`)
+      .select(`
+        *, 
+        clientes (nombres, apellidos), 
+        bicicletas (marca, modelo),
+        bicicletas_adquiridas (codigo_inventario, marca, modelo),
+        mecanicos (nombres, apellidos)
+      `)
       .eq('estado', estado)
     if (ordenes) {
-      // CORRECCIÓN: Convertir valores numéricos
-      const ordenesProcesadas = ordenes.map(o => ({
-        ...o,
-        costo_estimado: toNum(o.costo_estimado),
-        costo_real: toNum(o.costo_real),
-        cliente_nombre: `${o.clientes?.nombres || ''} ${o.clientes?.apellidos || ''}`,
-        bicicleta_info: `${o.bicicletas?.marca || ''} ${o.bicicletas?.modelo || ''}`,
-        mecanico_nombre: o.mecanicos ? `${o.mecanicos.nombres} ${o.mecanicos.apellidos}` : 'Sin asignar'
-      }))
+      const ordenesProcesadas = ordenes.map(procesarOrdenParaReporte)
       generarOrdenesPorEstadoPDF(ordenesProcesadas, estado)
       toast.success('Reporte de órdenes generado')
     }
   }
 
+  // ✅ CORREGIDO: Incluir join con bicicletas_adquiridas
   const generarComparacionDesdeBD = async (ordenIdParam: number) => {
     const { data: orden } = await supabase
       .from('ordenes_servicio')
-      .select(`*, clientes (nombres, apellidos), bicicletas (marca, modelo), mecanicos (nombres, apellidos)`)
+      .select(`
+        *, 
+        clientes (nombres, apellidos), 
+        bicicletas (marca, modelo),
+        bicicletas_adquiridas (codigo_inventario, marca, modelo),
+        mecanicos (nombres, apellidos)
+      `)
       .eq('id', ordenIdParam)
       .single()
     const { data: detalleOrden } = await supabase
       .from('detalle_ordenes_servicio')
       .select('*')
       .eq('orden_id', ordenIdParam)
-
     if (orden) {
-      // CORRECCIÓN: Convertir valores numéricos
       const detalleOrdenConvertido = (detalleOrden || []).map((d: any) => ({
         ...d,
         cantidad: toNum(d.cantidad),
@@ -237,16 +281,8 @@ export default function Reportes() {
         precio_unitario: toNum(d.precio_unitario),
         subtotal: toNum(d.subtotal)
       }))
-
-      const ordenProcesada = {
-        ...orden,
-        costo_estimado: toNum(orden.costo_estimado),
-        costo_real: toNum(orden.costo_real),
-        cliente_nombre: `${orden.clientes?.nombres || ''} ${orden.clientes?.apellidos || ''}`,
-        bicicleta_info: `${orden.bicicletas?.marca || ''} ${orden.bicicletas?.modelo || ''}`,
-        mecanico_nombre: orden.mecanicos ? `${orden.mecanicos.nombres} ${orden.mecanicos.apellidos}` : 'Sin asignar'
-      }
-
+      const ordenProcesada = procesarOrdenParaReporte(orden)
+      
       let cotizacionProcesada: any = null
       let detalleCotizacion: any[] = []
       if (orden.cotizacion_id) {
@@ -259,7 +295,6 @@ export default function Reportes() {
           .from('detalle_cotizaciones')
           .select('*')
           .eq('cotizacion_id', orden.cotizacion_id)
-
         cotizacionProcesada = cotizacion ? { ...cotizacion, total: toNum(cotizacion.total) } : null
         detalleCotizacion = (detalleCot || []).map((d: any) => ({
           ...d,
@@ -279,7 +314,6 @@ export default function Reportes() {
       .select(`*, categorias (nombre), marcas_inventario (nombre), proveedores (nombre)`)
       .order('nombre')
     if (inventario) {
-      // CORRECCIÓN: Convertir valores numéricos
       const inventarioProcesado = inventario.map(i => ({
         ...i,
         stock_actual: toNum(i.stock_actual),
@@ -295,6 +329,7 @@ export default function Reportes() {
     }
   }
 
+  // ✅ CORREGIDO: Incluir join con bicicletas_adquiridas
   const generarOrdenesMecanicoDesdeBD = async (mecanicoIdParam: number, inicio: string, fin: string) => {
     const { data: mecanico } = await supabase
       .from('mecanicos')
@@ -303,33 +338,38 @@ export default function Reportes() {
       .single()
     const { data: ordenes } = await supabase
       .from('ordenes_servicio')
-      .select(`*, clientes (nombres, apellidos), bicicletas (marca, modelo)`)
+      .select(`
+        *, 
+        clientes (nombres, apellidos), 
+        bicicletas (marca, modelo),
+        bicicletas_adquiridas (codigo_inventario, marca, modelo)
+      `)
       .eq('mecanico_id', mecanicoIdParam)
       .gte('fecha_ingreso', inicio)
       .lte('fecha_ingreso', fin)
     if (ordenes && mecanico) {
-      // CORRECCIÓN: Convertir valores numéricos
-      const ordenesProcesadas = ordenes.map(o => ({
-        ...o,
-        costo_real: toNum(o.costo_real),
-        cliente_nombre: `${o.clientes?.nombres || ''} ${o.clientes?.apellidos || ''}`,
-        bicicleta_info: `${o.bicicletas?.marca || ''} ${o.bicicletas?.modelo || ''}`
-      }))
+      const ordenesProcesadas = ordenes.map(procesarOrdenParaReporte)
       const nombreMecanico = `${mecanico.nombres} ${mecanico.apellidos}`
       generarOrdenesPorMecanicoPDF(ordenesProcesadas, nombreMecanico, inicio, fin)
       toast.success('Reporte por mecánico generado')
     }
   }
 
+  // ✅ CORREGIDO: Incluir join con bicicletas_adquiridas
   const generarIngresosDesdeBD = async (inicio: string, fin: string) => {
     const { data: ordenes } = await supabase
       .from('ordenes_servicio')
-      .select(`*, clientes (nombres, apellidos), detalle_ordenes_servicio (tipo, subtotal)`)
+      .select(`
+        *, 
+        clientes (nombres, apellidos), 
+        bicicletas (marca, modelo),
+        bicicletas_adquiridas (codigo_inventario, marca, modelo),
+        detalle_ordenes_servicio (tipo, subtotal)
+      `)
       .eq('estado', 'Completada')
       .gte('fecha_entrega_real', inicio)
       .lte('fecha_entrega_real', fin)
     if (ordenes) {
-      // CORRECCIÓN: Convertir valores numéricos y usar toNum en reduce
       const ordenesProcesadas = ordenes.map(o => {
         const totalServicios = (o.detalle_ordenes_servicio || [])
           .filter((d: any) => d.tipo === 'servicio')
@@ -338,9 +378,7 @@ export default function Reportes() {
           .filter((d: any) => d.tipo === 'repuesto')
           .reduce((sum: number, d: any) => sum + toNum(d.subtotal), 0)
         return {
-          ...o,
-          costo_real: toNum(o.costo_real),
-          cliente_nombre: `${o.clientes?.nombres || ''} ${o.clientes?.apellidos || ''}`,
+          ...procesarOrdenParaReporte(o),
           total_servicios: totalServicios,
           total_repuestos: totalRepuestos
         }
@@ -365,7 +403,6 @@ export default function Reportes() {
         <h1 className="text-2xl font-bold text-slate-800">Reportes PDF</h1>
         <p className="text-slate-500 mt-1">Genere informes y documentos PDF del sistema</p>
       </div>
-
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {reportes.map((reporte) => (
           <div
@@ -385,7 +422,6 @@ export default function Reportes() {
           </div>
         ))}
       </div>
-
       {modalAbierto !== null && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
