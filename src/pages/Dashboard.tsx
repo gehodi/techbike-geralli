@@ -74,13 +74,17 @@ export default function Dashboard() {
         (i.stock_actual - (i.stock_reservado || 0)) <= i.stock_minimo
       ).length
 
-      // Ingresos del mes (órdenes completadas)
+      // ✅ CORRECCIÓN: Ingresos del mes = SOLO órdenes de CLIENTE completadas.
+      // Se excluyen 'interna_bicicleta_usada' y 'garantia' porque son a costo
+      // (no generan ingreso; su costo se recupera en la venta de la bicicleta).
+      // Se incluyen tipo_orden 'cliente' y NULL (órdenes antiguas de cliente).
       const ahora = new Date()
       const primerDiaMes = new Date(ahora.getFullYear(), ahora.getMonth(), 1).toISOString()
       const { data: ordenesMes } = await supabase
         .from('ordenes_servicio')
         .select('costo_real')
         .eq('estado', 'Completada')
+        .or('tipo_orden.eq.cliente,tipo_orden.is.null')
         .gte('fecha_entrega_real', primerDiaMes)
       const ingresosMes = (ordenesMes || []).reduce((sum: number, o: any) => sum + (o.costo_real || 0), 0)
 
@@ -90,12 +94,11 @@ export default function Dashboard() {
         .select('*', { count: 'exact', head: true })
         .eq('estado_aprobacion', 'Pendiente')
 
-      // ✅ NUEVO: Garantías por vencer en 15 días
+      // Garantías por vencer en 15 días
       const hoy = new Date().toISOString().split('T')[0]
       const fechaLimite = new Date()
       fechaLimite.setDate(fechaLimite.getDate() + 15)
       const fechaLimiteStr = fechaLimite.toISOString().split('T')[0]
-
       const { count: garantiasPorVencer } = await supabase
         .from('garantias')
         .select('*', { count: 'exact', head: true })
@@ -125,7 +128,6 @@ export default function Dashboard() {
         .select(`id, numero_orden, estado, fecha_ingreso, costo_estimado, clientes(nombres, apellidos)`)
         .order('fecha_ingreso', { ascending: false })
         .limit(5)
-
       if (error) throw error
       const procesadas = (data || []).map((o: any) => ({
         ...o,
@@ -158,17 +160,14 @@ export default function Dashboard() {
         .lte('fecha_fin', fechaLimiteStr)
         .order('fecha_fin', { ascending: true })
         .limit(5)
-
       if (error) throw error
 
       const hoyDate = new Date()
       hoyDate.setHours(0, 0, 0, 0)
-
       const procesadas: GarantiaPorVencer[] = (data || []).map((g: any) => {
         const fechaFin = new Date(g.fecha_fin)
         const diffTime = fechaFin.getTime() - hoyDate.getTime()
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-
         return {
           ...g,
           bicicleta_codigo: g.bicicletas_adquiridas?.codigo_inventario || '-',
@@ -176,7 +175,6 @@ export default function Dashboard() {
           dias_restantes: diffDays
         }
       })
-
       setGarantiasPorVencer(procesadas)
     } catch (error: any) {
       console.error('Error cargando garantías por vencer:', error)
@@ -257,11 +255,11 @@ export default function Dashboard() {
           </div>
           <div className="text-sm text-slate-600">Ingresos del Mes</div>
           <div className="text-3xl font-bold text-green-600 mt-1">{formatCurrency(stats.ingresosMes)}</div>
-          <div className="text-xs text-slate-500 mt-1">órdenes completadas</div>
+          <div className="text-xs text-slate-500 mt-1">servicios a clientes completados</div>
         </div>
       </div>
 
-      {/* ✅ NUEVA TARJETA: Garantías por Vencer */}
+      {/* Tarjeta: Garantías por Vencer */}
       {stats.garantiasPorVencer > 0 && (
         <div 
           className="bg-amber-50 border-2 border-amber-300 rounded-xl shadow-sm p-6 cursor-pointer hover:shadow-md transition-shadow"
@@ -282,8 +280,6 @@ export default function Dashboard() {
               <div className="text-xs text-amber-600">requieren atención</div>
             </div>
           </div>
-
-          {/* Lista de garantías próximas a vencer */}
           <div className="mt-4 space-y-2">
             {garantiasPorVencer.slice(0, 3).map((g) => (
               <div key={g.id} className="bg-white rounded-lg p-3 border border-amber-200 flex items-center justify-between">
@@ -310,12 +306,9 @@ export default function Dashboard() {
 
       {/* Panel de alertas y actividad */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Alertas de stock - ocupa 2 columnas */}
         <div className="lg:col-span-2">
           <AlertasStock />
         </div>
-
-        {/* Órdenes recientes */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
           <div className="bg-slate-50 px-6 py-4 border-b border-slate-200">
             <h3 className="font-semibold text-slate-800 flex items-center gap-2">
@@ -360,13 +353,11 @@ export default function Dashboard() {
             <div className="font-medium text-slate-900 text-sm">Nueva Solicitud</div>
             <div className="text-xs text-slate-600 mt-1">Registro de cliente</div>
           </button>
-
           <button onClick={() => navigate('/cotizaciones')} className="p-4 bg-green-50 hover:bg-green-100 rounded-lg text-left transition-colors">
             <DollarSign className="w-6 h-6 text-green-600 mb-2" />
             <div className="font-medium text-slate-900 text-sm">Nueva Cotización</div>
             <div className="text-xs text-slate-600 mt-1">Presupuesto servicio</div>
           </button>
-
           <button onClick={() => navigate('/inventario')} className="p-4 bg-purple-50 hover:bg-purple-100 rounded-lg text-left transition-colors relative">
             <Package className="w-6 h-6 text-purple-600 mb-2" />
             <div className="font-medium text-slate-900 text-sm">Inventario</div>
@@ -377,7 +368,6 @@ export default function Dashboard() {
               </span>
             )}
           </button>
-
           <button onClick={() => navigate('/requisiciones')} className="p-4 bg-orange-50 hover:bg-orange-100 rounded-lg text-left transition-colors relative">
             <AlertTriangle className="w-6 h-6 text-orange-600 mb-2" />
             <div className="font-medium text-slate-900 text-sm">Reposiciones</div>
@@ -388,20 +378,16 @@ export default function Dashboard() {
               </span>
             )}
           </button>
-
-          {/* ✅ NUEVOS: Accesos rápidos para Bicicletas Usadas */}
           <button onClick={() => navigate('/bicicletas-usadas')} className="p-4 bg-cyan-50 hover:bg-cyan-100 rounded-lg text-left transition-colors">
             <Bike className="w-6 h-6 text-cyan-600 mb-2" />
             <div className="font-medium text-slate-900 text-sm">Adquirir Bicicleta</div>
             <div className="text-xs text-slate-600 mt-1">Nueva adquisición</div>
           </button>
-
           <button onClick={() => navigate('/ventas-bicicletas')} className="p-4 bg-emerald-50 hover:bg-emerald-100 rounded-lg text-left transition-colors">
             <DollarSign className="w-6 h-6 text-emerald-600 mb-2" />
             <div className="font-medium text-slate-900 text-sm">Vender Bicicleta</div>
             <div className="text-xs text-slate-600 mt-1">Registrar venta</div>
           </button>
-
           <button onClick={() => navigate('/garantias')} className="p-4 bg-amber-50 hover:bg-amber-100 rounded-lg text-left transition-colors relative">
             <Shield className="w-6 h-6 text-amber-600 mb-2" />
             <div className="font-medium text-slate-900 text-sm">Garantías</div>
@@ -412,7 +398,6 @@ export default function Dashboard() {
               </span>
             )}
           </button>
-
           <button onClick={() => navigate('/reclamaciones-garantia')} className="p-4 bg-rose-50 hover:bg-rose-100 rounded-lg text-left transition-colors">
             <Wrench className="w-6 h-6 text-rose-600 mb-2" />
             <div className="font-medium text-slate-900 text-sm">Reclamaciones</div>

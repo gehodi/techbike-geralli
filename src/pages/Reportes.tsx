@@ -2,13 +2,12 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { FileText, ClipboardList, TrendingUp, Package, Wrench, DollarSign, Download, X } from 'lucide-react'
 import toast from 'react-hot-toast'
+import jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'
 import {
   generarCotizacionPDF,
-  generarOrdenesPorEstadoPDF,
   generarComparacionPDF,
-  generarInventarioPDF,
-  generarOrdenesPorMecanicoPDF,
-  generarIngresosPDF
+  generarInventarioPDF
 } from '../utils/pdfGenerator'
 
 interface ReporteCard {
@@ -17,6 +16,13 @@ interface ReporteCard {
   descripcion: string
   icono: React.ReactNode
   color: string
+}
+
+interface GrupoOrden {
+  key: string
+  titulo: string
+  color: [number, number, number]
+  items: any[]
 }
 
 export default function Reportes() {
@@ -55,32 +61,21 @@ export default function Reportes() {
     setCotizacionesDisponibles(procesadas)
   }
 
-  // ✅ CORREGIDO: Incluir join con bicicletas_adquiridas
   async function fetchOrdenesCompletadas() {
     const { data } = await supabase
       .from('ordenes_servicio')
-      .select(`
-        id, 
-        numero_orden, 
-        tipo_orden,
-        clientes (nombres, apellidos), 
-        bicicletas (marca, modelo),
-        bicicletas_adquiridas (codigo_inventario, marca, modelo)
-      `)
+      .select(`id, numero_orden, tipo_orden, clientes (nombres, apellidos), bicicletas (marca, modelo), bicicletas_adquiridas (codigo_inventario, marca, modelo)`)
       .eq('estado', 'Completada')
       .order('id', { ascending: false })
     const procesadas = (data || []).map((o: any) => {
-      // Determinar bicicleta según tipo de orden
-      const esInterna = o.tipo_orden === 'interna_bicicleta_usada'
+      const esInterna = o.tipo_orden === 'interna_bicicleta_usada' || o.tipo_orden === 'garantia'
       const bici = esInterna ? o.bicicletas_adquiridas : o.bicicletas
-      const biciLabel = bici 
+      const biciLabel = bici
         ? `${bici.codigo_inventario ? bici.codigo_inventario + ' - ' : ''}${bici.marca || ''} ${bici.modelo || ''}`.trim()
         : 'Sin bicicleta'
-      
-      const clienteLabel = o.clientes 
+      const clienteLabel = o.clientes
         ? `${o.clientes.nombres || ''} ${o.clientes.apellidos || ''}`.trim()
         : (esInterna ? 'Interna' : 'Sin cliente')
-      
       return {
         id: o.id,
         label: `${o.numero_orden || 'S/N'} - ${clienteLabel} - ${biciLabel}`,
@@ -99,48 +94,12 @@ export default function Reportes() {
   }
 
   const reportes: ReporteCard[] = [
-    {
-      id: 1,
-      titulo: 'Cotización al Cliente',
-      descripcion: 'Generar PDF de cotización para enviar al cliente',
-      icono: <FileText className="w-8 h-8" />,
-      color: 'bg-blue-500'
-    },
-    {
-      id: 2,
-      titulo: 'Órdenes por Estado',
-      descripcion: 'Listado de órdenes agrupadas por estado',
-      icono: <ClipboardList className="w-8 h-8" />,
-      color: 'bg-green-500'
-    },
-    {
-      id: 3,
-      titulo: 'Detalle de Orden Completada',
-      descripcion: 'Ver detalle completo de una orden de servicio',
-      icono: <TrendingUp className="w-8 h-8" />,
-      color: 'bg-purple-500'
-    },
-    {
-      id: 4,
-      titulo: 'Listado de Inventario',
-      descripcion: 'Inventario completo con existencias reales',
-      icono: <Package className="w-8 h-8" />,
-      color: 'bg-orange-500'
-    },
-    {
-      id: 5,
-      titulo: 'Órdenes por Mecánico',
-      descripcion: 'Órdenes asignadas por mecánico en rango de fechas',
-      icono: <Wrench className="w-8 h-8" />,
-      color: 'bg-red-500'
-    },
-    {
-      id: 6,
-      titulo: 'Ingresos por Órdenes',
-      descripcion: 'Informe de ingresos por órdenes completadas',
-      icono: <DollarSign className="w-8 h-8" />,
-      color: 'bg-emerald-500'
-    }
+    { id: 1, titulo: 'Cotización al Cliente', descripcion: 'Generar PDF de cotización para enviar al cliente', icono: <FileText className="w-8 h-8" />, color: 'bg-blue-500' },
+    { id: 2, titulo: 'Órdenes por Estado', descripcion: 'Listado por estado, agrupado y totalizado por tipo de orden', icono: <ClipboardList className="w-8 h-8" />, color: 'bg-green-500' },
+    { id: 3, titulo: 'Detalle de Orden Completada', descripcion: 'Ver detalle completo de una orden de servicio', icono: <TrendingUp className="w-8 h-8" />, color: 'bg-purple-500' },
+    { id: 4, titulo: 'Listado de Inventario', descripcion: 'Inventario completo con existencias reales', icono: <Package className="w-8 h-8" />, color: 'bg-orange-500' },
+    { id: 5, titulo: 'Órdenes por Mecánico', descripcion: 'Órdenes asignadas por mecánico, agrupadas por tipo', icono: <Wrench className="w-8 h-8" />, color: 'bg-red-500' },
+    { id: 6, titulo: 'Ingresos por Órdenes', descripcion: 'Informe de ingresos solo por órdenes de clientes', icono: <DollarSign className="w-8 h-8" />, color: 'bg-emerald-500' }
   ]
 
   const handleGenerarReporte = async (reporteId: number) => {
@@ -173,9 +132,9 @@ export default function Reportes() {
       }
       setModalAbierto(null)
       resetFiltros()
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error generando reporte:', error)
-      toast.error('Error al generar el reporte')
+      toast.error('Error al generar el reporte: ' + (error?.message || 'desconocido'))
     } finally {
       setLoading(false)
     }
@@ -186,27 +145,44 @@ export default function Reportes() {
     return parseFloat(String(v)) || 0
   }
 
-  // ✅ FUNCIÓN HELPER: Procesar orden para reportes (maneja ambos tipos)
+  const money = (v: number): string => {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v || 0)
+  }
+
+  const formatDate = (d: string) => d ? new Date(d).toLocaleDateString('es-CO') : '-'
+
+  // ✅ CORREGIDO: sin parámetros sin usar
+  const piePagina = () => `Generado: ${new Date().toLocaleDateString('es-CO')} - Space Bike - Sistema de Gestión`
+
   const procesarOrdenParaReporte = (o: any) => {
     const esInterna = o.tipo_orden === 'interna_bicicleta_usada' || o.tipo_orden === 'garantia'
     const bici = esInterna ? o.bicicletas_adquiridas : o.bicicletas
     const cliente = o.clientes
-    
     return {
       ...o,
       costo_estimado: toNum(o.costo_estimado),
       costo_real: toNum(o.costo_real),
       tipo_orden: o.tipo_orden || 'cliente',
-      cliente_nombre: cliente 
+      cliente_nombre: cliente
         ? `${cliente.nombres || ''} ${cliente.apellidos || ''}`.trim()
         : (esInterna ? 'Interna' : 'Sin cliente'),
-      bicicleta_info: bici 
+      bicicleta_info: bici
         ? `${bici.codigo_inventario ? bici.codigo_inventario + ' - ' : ''}${bici.marca || ''} ${bici.modelo || ''}`.trim()
         : 'Sin bicicleta',
       bicicleta_codigo: bici?.codigo_inventario || '',
       mecanico_nombre: o.mecanicos ? `${o.mecanicos.nombres} ${o.mecanicos.apellidos}` : 'Sin asignar'
     }
   }
+
+  // Regla de negocio: valor acumulable como ingreso (solo clientes acumulan)
+  const valorOrden = (o: any): number => (o.estado === 'Completada' ? o.costo_real : o.costo_estimado)
+
+  // ✅ CORREGIDO: tuplas de color tipadas explícitamente
+  const armarGrupos = (ordenes: any[]): GrupoOrden[] => [
+    { key: 'cliente', titulo: 'ÓRDENES DE CLIENTE (TALLER)', color: [37, 99, 235] as [number, number, number], items: ordenes.filter(o => o.tipo_orden === 'cliente') },
+    { key: 'interna', titulo: 'ÓRDENES INTERNAS (REACONDICIONAMIENTO)', color: [22, 163, 74] as [number, number, number], items: ordenes.filter(o => o.tipo_orden === 'interna_bicicleta_usada') },
+    { key: 'garantia', titulo: 'ÓRDENES DE GARANTÍA', color: [147, 51, 234] as [number, number, number], items: ordenes.filter(o => o.tipo_orden === 'garantia') }
+  ].filter(g => g.items.length > 0)
 
   const generarCotizacionDesdeBD = async (id: number) => {
     const { data: cotizacion } = await supabase
@@ -236,42 +212,104 @@ export default function Reportes() {
     }
   }
 
-  // ✅ CORREGIDO: Incluir join con bicicletas_adquiridas
+  // ========== REPORTE 2: ÓRDENES POR ESTADO (PDF local agrupado por tipo) ==========
   const generarOrdenesDesdeBD = async (estado: string) => {
-    const { data: ordenes } = await supabase
+    const { data: ordenes, error } = await supabase
       .from('ordenes_servicio')
-      .select(`
-        *, 
-        clientes (nombres, apellidos), 
-        bicicletas (marca, modelo),
-        bicicletas_adquiridas (codigo_inventario, marca, modelo),
-        mecanicos (nombres, apellidos)
-      `)
+      .select(`*, clientes (nombres, apellidos), bicicletas (marca, modelo), bicicletas_adquiridas (codigo_inventario, marca, modelo), mecanicos (nombres, apellidos)`)
       .eq('estado', estado)
-    if (ordenes) {
-      const ordenesProcesadas = ordenes.map(procesarOrdenParaReporte)
-      generarOrdenesPorEstadoPDF(ordenesProcesadas, estado)
-      toast.success('Reporte de órdenes generado')
+    if (error) throw error
+    if (!ordenes || ordenes.length === 0) {
+      toast.error(`No hay órdenes en estado ${estado}`)
+      return
     }
+    const procesadas = ordenes.map(procesarOrdenParaReporte)
+    const grupos = armarGrupos(procesadas)
+
+    const doc = new jsPDF()
+    doc.setFontSize(16)
+    doc.text('ÓRDENES DE SERVICIO', 14, 16)
+    doc.setFontSize(11)
+    doc.text(`Estado: ${estado}`, 14, 24)
+    doc.setFontSize(9)
+    doc.text(piePagina(), 14, 30)
+
+    let y = 38
+    let ingresos = 0
+    let costoInterno = 0
+    let totalOrdenes = 0
+    let totalCompletadas = 0
+
+    for (const g of grupos) {
+      const completadas = g.items.filter(o => o.estado === 'Completada')
+      const valor = g.items.reduce((s, o) => s + valorOrden(o), 0)
+      totalOrdenes += g.items.length
+      totalCompletadas += completadas.length
+      if (g.key === 'cliente') ingresos += valor
+      else costoInterno += valor
+
+      doc.setFontSize(12)
+      doc.setTextColor(g.color[0], g.color[1], g.color[2])
+      doc.text(g.titulo, 14, y)
+      doc.setTextColor(0, 0, 0)
+
+      autoTable(doc, {
+        startY: y + 3,
+        head: [['N° Orden', 'Cliente / Ref.', 'Bicicleta', 'Mecánico', 'Ingreso', 'Costo Estimado', 'Costo Real']],
+        body: g.items.map(o => [
+          o.numero_orden || 'S/N',
+          o.cliente_nombre,
+          o.bicicleta_info,
+          o.mecanico_nombre,
+          formatDate(o.fecha_ingreso),
+          money(o.costo_estimado),
+          money(o.costo_real)
+        ]),
+        foot: [[
+          { content: `${g.key === 'cliente' ? 'Valor acumulado como INGRESO' : 'Costo interno (NO es ingreso)'} (${g.items.length} órdenes, ${completadas.length} completadas):`, colSpan: 6, styles: { halign: 'right' } },
+          { content: money(valor), styles: { halign: 'right' } }
+        ]],
+        styles: { fontSize: 8 },
+        headStyles: { fillColor: g.color },
+        footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' }
+      })
+      y = (doc as any).lastAutoTable.finalY + 10
+    }
+
+    autoTable(doc, {
+      startY: y,
+      head: [['RESUMEN POR TIPO DE ORDEN', 'Órdenes', 'Completadas', 'Valor']],
+      body: grupos.map(g => {
+        const comp = g.items.filter(o => o.estado === 'Completada')
+        return [g.titulo, String(g.items.length), String(comp.length), money(g.items.reduce((s, o) => s + valorOrden(o), 0))]
+      }),
+      foot: [
+        [{ content: `TOTAL ÓRDENES: ${totalOrdenes} | COMPLETADAS: ${totalCompletadas}`, colSpan: 4, styles: { halign: 'center' } }],
+        [{ content: 'INGRESOS (solo órdenes de cliente):', colSpan: 3, styles: { halign: 'right' } }, { content: money(ingresos), styles: { halign: 'right' } }],
+        [{ content: 'COSTO INTERNO (internas + garantía, NO es ingreso):', colSpan: 3, styles: { halign: 'right' } }, { content: money(costoInterno), styles: { halign: 'right' } }]
+      ],
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [51, 65, 85] },
+      footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' }
+    })
+
+    doc.save(`Ordenes_Estado_${estado.replace(/\s+/g, '_')}.pdf`)
+    toast.success('Reporte de órdenes generado (agrupado por tipo)')
   }
 
-  // ✅ CORREGIDO: Incluir join con bicicletas_adquiridas
+  // ========== REPORTE 3: DETALLE DE ORDEN COMPLETADA ==========
   const generarComparacionDesdeBD = async (ordenIdParam: number) => {
-    const { data: orden } = await supabase
+    const { data: orden, error: errorOrden } = await supabase
       .from('ordenes_servicio')
-      .select(`
-        *, 
-        clientes (nombres, apellidos), 
-        bicicletas (marca, modelo),
-        bicicletas_adquiridas (codigo_inventario, marca, modelo),
-        mecanicos (nombres, apellidos)
-      `)
+      .select(`*, clientes (nombres, apellidos), bicicletas (marca, modelo), bicicletas_adquiridas (codigo_inventario, marca, modelo), mecanicos (nombres, apellidos)`)
       .eq('id', ordenIdParam)
       .single()
-    const { data: detalleOrden } = await supabase
+    if (errorOrden) throw errorOrden
+    const { data: detalleOrden, error: errorDetalle } = await supabase
       .from('detalle_ordenes_servicio')
       .select('*')
       .eq('orden_id', ordenIdParam)
+    if (errorDetalle) throw errorDetalle
     if (orden) {
       const detalleOrdenConvertido = (detalleOrden || []).map((d: any) => ({
         ...d,
@@ -282,7 +320,6 @@ export default function Reportes() {
         subtotal: toNum(d.subtotal)
       }))
       const ordenProcesada = procesarOrdenParaReporte(orden)
-      
       let cotizacionProcesada: any = null
       let detalleCotizacion: any[] = []
       if (orden.cotizacion_id) {
@@ -308,6 +345,7 @@ export default function Reportes() {
     }
   }
 
+  // ========== REPORTE 4: INVENTARIO ==========
   const generarInventarioDesdeBD = async () => {
     const { data: inventario } = await supabase
       .from('inventario')
@@ -329,63 +367,168 @@ export default function Reportes() {
     }
   }
 
-  // ✅ CORREGIDO: Incluir join con bicicletas_adquiridas
+  // ========== REPORTE 5: ÓRDENES POR MECÁNICO (PDF local agrupado por tipo) ==========
   const generarOrdenesMecanicoDesdeBD = async (mecanicoIdParam: number, inicio: string, fin: string) => {
     const { data: mecanico } = await supabase
       .from('mecanicos')
       .select('nombres, apellidos')
       .eq('id', mecanicoIdParam)
       .single()
-    const { data: ordenes } = await supabase
+    const { data: ordenes, error } = await supabase
       .from('ordenes_servicio')
-      .select(`
-        *, 
-        clientes (nombres, apellidos), 
-        bicicletas (marca, modelo),
-        bicicletas_adquiridas (codigo_inventario, marca, modelo)
-      `)
+      .select(`*, clientes (nombres, apellidos), bicicletas (marca, modelo), bicicletas_adquiridas (codigo_inventario, marca, modelo)`)
       .eq('mecanico_id', mecanicoIdParam)
       .gte('fecha_ingreso', inicio)
       .lte('fecha_ingreso', fin)
-    if (ordenes && mecanico) {
-      const ordenesProcesadas = ordenes.map(procesarOrdenParaReporte)
-      const nombreMecanico = `${mecanico.nombres} ${mecanico.apellidos}`
-      generarOrdenesPorMecanicoPDF(ordenesProcesadas, nombreMecanico, inicio, fin)
-      toast.success('Reporte por mecánico generado')
+    if (error) throw error
+    if (!ordenes || !mecanico) {
+      toast.error('No hay datos para el rango seleccionado')
+      return
     }
+    const procesadas = ordenes.map(procesarOrdenParaReporte)
+    const nombreMecanico = `${mecanico.nombres} ${mecanico.apellidos}`
+    const grupos = armarGrupos(procesadas)
+    if (grupos.length === 0) {
+      toast.error('No hay órdenes para este mecánico en el rango')
+      return
+    }
+
+    const doc = new jsPDF()
+    doc.setFontSize(16)
+    doc.text('ÓRDENES ASIGNADAS POR MECÁNICO', 14, 16)
+    doc.setFontSize(11)
+    doc.text(`Mecánico: ${nombreMecanico}`, 14, 24)
+    doc.text(`Rango de ingreso: ${inicio} al ${fin}`, 14, 30)
+    doc.setFontSize(9)
+    doc.text(piePagina(), 14, 36)
+
+    let y = 44
+    let ingresosCliente = 0
+    let costoInterno = 0
+    let totalOrdenes = 0
+    let totalCompletadas = 0
+
+    for (const g of grupos) {
+      const completadas = g.items.filter(o => o.estado === 'Completada')
+      const montoCompletadas = completadas.reduce((s, o) => s + o.costo_real, 0)
+      totalOrdenes += g.items.length
+      totalCompletadas += completadas.length
+      if (g.key === 'cliente') ingresosCliente += montoCompletadas
+      else costoInterno += montoCompletadas
+
+      doc.setFontSize(12)
+      doc.setTextColor(g.color[0], g.color[1], g.color[2])
+      doc.text(g.titulo, 14, y)
+      doc.setTextColor(0, 0, 0)
+
+      autoTable(doc, {
+        startY: y + 3,
+        head: [['N° Orden', 'Cliente / Ref.', 'Bicicleta', 'Estado', 'Ingreso', 'Costo Real']],
+        body: g.items.map(o => [
+          o.numero_orden || 'S/N',
+          o.cliente_nombre,
+          o.bicicleta_info,
+          o.estado,
+          formatDate(o.fecha_ingreso),
+          money(o.costo_real)
+        ]),
+        foot: [[
+          { content: `Subtotal ${g.items.length} órdenes (${completadas.length} completadas):`, colSpan: 5, styles: { halign: 'right' } },
+          { content: money(montoCompletadas), styles: { halign: 'right' } }
+        ]],
+        styles: { fontSize: 9 },
+        headStyles: { fillColor: g.color },
+        footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' }
+      })
+      y = (doc as any).lastAutoTable.finalY + 10
+    }
+
+    autoTable(doc, {
+      startY: y,
+      head: [['RESUMEN POR TIPO DE ORDEN', 'Órdenes', 'Completadas', 'Monto Completadas']],
+      body: grupos.map(g => {
+        const comp = g.items.filter(o => o.estado === 'Completada')
+        return [g.titulo, String(g.items.length), String(comp.length), money(comp.reduce((s, o) => s + o.costo_real, 0))]
+      }),
+      foot: [
+        [{ content: `TOTAL ÓRDENES: ${totalOrdenes} | COMPLETADAS: ${totalCompletadas}`, colSpan: 4, styles: { halign: 'center' } }],
+        [{ content: 'INGRESOS REALES (solo órdenes de cliente):', colSpan: 3, styles: { halign: 'right' } }, { content: money(ingresosCliente), styles: { halign: 'right' } }],
+        [{ content: 'COSTO INTERNO (internas + garantía, NO es ingreso):', colSpan: 3, styles: { halign: 'right' } }, { content: money(costoInterno), styles: { halign: 'right' } }]
+      ],
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [51, 65, 85] },
+      footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' }
+    })
+
+    doc.save(`Ordenes_Mecanico_${nombreMecanico.replace(/\s+/g, '_')}_${inicio}_a_${fin}.pdf`)
+    toast.success('Reporte por mecánico generado (agrupado por tipo)')
   }
 
-  // ✅ CORREGIDO: Incluir join con bicicletas_adquiridas
+  // ========== REPORTE 6: INGRESOS (PDF local, SOLO clientes) ==========
   const generarIngresosDesdeBD = async (inicio: string, fin: string) => {
-    const { data: ordenes } = await supabase
+    const { data: ordenes, error } = await supabase
       .from('ordenes_servicio')
-      .select(`
-        *, 
-        clientes (nombres, apellidos), 
-        bicicletas (marca, modelo),
-        bicicletas_adquiridas (codigo_inventario, marca, modelo),
-        detalle_ordenes_servicio (tipo, subtotal)
-      `)
+      .select(`*, clientes (nombres, apellidos), bicicletas (marca, modelo), bicicletas_adquiridas (codigo_inventario, marca, modelo), detalle_ordenes_servicio (tipo, subtotal)`)
       .eq('estado', 'Completada')
+      .or('tipo_orden.eq.cliente,tipo_orden.is.null')
       .gte('fecha_entrega_real', inicio)
       .lte('fecha_entrega_real', fin)
-    if (ordenes) {
-      const ordenesProcesadas = ordenes.map(o => {
-        const totalServicios = (o.detalle_ordenes_servicio || [])
-          .filter((d: any) => d.tipo === 'servicio')
-          .reduce((sum: number, d: any) => sum + toNum(d.subtotal), 0)
-        const totalRepuestos = (o.detalle_ordenes_servicio || [])
-          .filter((d: any) => d.tipo === 'repuesto')
-          .reduce((sum: number, d: any) => sum + toNum(d.subtotal), 0)
-        return {
-          ...procesarOrdenParaReporte(o),
-          total_servicios: totalServicios,
-          total_repuestos: totalRepuestos
-        }
-      })
-      generarIngresosPDF(ordenesProcesadas, inicio, fin)
-      toast.success('Informe de ingresos generado')
+    if (error) throw error
+    if (!ordenes || ordenes.length === 0) {
+      toast.error('No hay órdenes de cliente completadas en el rango')
+      return
     }
+    const procesadas = ordenes.map(o => {
+      const totalServicios = (o.detalle_ordenes_servicio || [])
+        .filter((d: any) => d.tipo === 'servicio')
+        .reduce((sum: number, d: any) => sum + toNum(d.subtotal), 0)
+      const totalRepuestos = (o.detalle_ordenes_servicio || [])
+        .filter((d: any) => d.tipo === 'repuesto')
+        .reduce((sum: number, d: any) => sum + toNum(d.subtotal), 0)
+      return {
+        ...procesarOrdenParaReporte(o),
+        total_servicios: totalServicios,
+        total_repuestos: totalRepuestos
+      }
+    })
+
+    // ✅ CORREGIDO: totales calculados Y usados en el pie del PDF
+    const totalServ = procesadas.reduce((s, o) => s + o.total_servicios, 0)
+    const totalRep = procesadas.reduce((s, o) => s + o.total_repuestos, 0)
+    const granTotal = procesadas.reduce((s, o) => s + o.costo_real, 0)
+
+    const doc = new jsPDF()
+    doc.setFontSize(16)
+    doc.text('INGRESOS POR ÓRDENES COMPLETADAS', 14, 16)
+    doc.setFontSize(11)
+    doc.text(`Rango de entrega: ${inicio} al ${fin}`, 14, 24)
+    doc.setFontSize(9)
+    doc.text('Incluye únicamente órdenes de servicio a clientes (las internas y garantías no generan ingreso).', 14, 30)
+    doc.text(piePagina(), 14, 36)
+
+    autoTable(doc, {
+      startY: 42,
+      head: [['N° Orden', 'Cliente', 'Bicicleta', 'Entrega', 'Servicios', 'Repuestos', 'Total']],
+      body: procesadas.map(o => [
+        o.numero_orden || 'S/N',
+        o.cliente_nombre,
+        o.bicicleta_info,
+        formatDate(o.fecha_entrega_real),
+        money(o.total_servicios),
+        money(o.total_repuestos),
+        money(o.costo_real)
+      ]),
+      foot: [[
+        { content: `Servicios: ${money(totalServ)} | Repuestos: ${money(totalRep)} | TOTAL INGRESOS:`, colSpan: 6, styles: { halign: 'right' } },
+        { content: money(granTotal), styles: { halign: 'right' } }
+      ]],
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [5, 150, 105] },
+      footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' }
+    })
+
+    doc.save(`Ingresos_${inicio}_a_${fin}.pdf`)
+    toast.success('Informe de ingresos generado (solo clientes)')
   }
 
   const resetFiltros = () => {
