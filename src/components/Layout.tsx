@@ -26,40 +26,46 @@ export default function Layout() {
   const location = useLocation()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [catalogosOpen, setCatalogosOpen] = useState(true)
-  const [badges, setBadges] = useState({ 
-    stockBajo: 0, 
+  const [badges, setBadges] = useState({
+    stockBajo: 0,
     reqPendientes: 0,
-    garantiasPorVencer: 0 // ✅ NUEVO
+    garantiasPorVencer: 0
   })
 
   useEffect(() => {
     fetchBadges()
   }, [])
 
+  // ✅ Bloquea el scroll del fondo mientras el menú móvil está abierto
+  useEffect(() => {
+    document.body.style.overflow = mobileMenuOpen ? 'hidden' : ''
+    return () => { document.body.style.overflow = '' }
+  }, [mobileMenuOpen])
+
+  // ✅ Cierra el menú automáticamente al navegar a otra ruta
+  useEffect(() => {
+    setMobileMenuOpen(false)
+  }, [location.pathname])
+
   async function fetchBadges() {
     try {
-      // Stock bajo
       const { data: inventario } = await supabase
         .from('inventario')
         .select('stock_actual, stock_reservado, stock_minimo')
         .eq('estado', 'disponible')
-
       const stockBajo = (inventario || []).filter((i: any) => 
         (i.stock_actual - (i.stock_reservado || 0)) <= i.stock_minimo
       ).length
 
-      // Solicitudes pendientes
       const { count: reqPendientes } = await supabase
         .from('requisiciones_inventario')
         .select('*', { count: 'exact', head: true })
         .eq('estado_aprobacion', 'Pendiente')
 
-      // ✅ Garantías por vencer en 15 días
       const hoy = new Date().toISOString().split('T')[0]
       const fechaLimite = new Date()
       fechaLimite.setDate(fechaLimite.getDate() + 15)
       const fechaLimiteStr = fechaLimite.toISOString().split('T')[0]
-
       const { count: garantiasPorVencer } = await supabase
         .from('garantias')
         .select('*', { count: 'exact', head: true })
@@ -87,7 +93,7 @@ export default function Layout() {
     { path: '/bicicletas', label: 'Bicicletas', icon: Bike },
     { path: '/bicicletas-usadas', label: 'Adquisición Bicicletas', icon: Bike },
     { path: '/ventas-bicicletas', label: 'Ventas Bicicletas', icon: DollarSign },
-    { path: '/garantias', label: 'Garantías', icon: Shield, badge: badges.garantiasPorVencer }, // ✅ Badge agregado
+    { path: '/garantias', label: 'Garantías', icon: Shield, badge: badges.garantiasPorVencer },
     { path: '/reclamaciones-garantia', label: 'Reclamaciones', icon: AlertTriangle },
     { path: '/mecanicos', label: 'Mecánicos', icon: Wrench },
     { path: '/inventario', label: 'Inventario', icon: Package, badge: badges.stockBajo },
@@ -143,9 +149,10 @@ export default function Layout() {
       </div>
 
       <div className="flex">
-        {/* Sidebar */}
+        {/* ✅ CORREGIDO: en móvil arranca debajo del header (top-16) y con altura exacta;
+            en desktop sigue sticky a pantalla completa */}
         <aside className={`
-          fixed lg:sticky top-0 left-0 h-screen w-64 bg-white border-r border-slate-200 z-30
+          fixed top-16 lg:top-0 left-0 h-[calc(100vh-4rem)] lg:h-screen w-64 bg-white border-r border-slate-200 z-30
           transform transition-transform duration-300 ease-in-out
           ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         `}>
@@ -155,8 +162,20 @@ export default function Layout() {
               <h1 className="text-xl font-bold text-slate-800">Taller Bike</h1>
             </div>
 
-            {/* Menú */}
-            <nav className="flex-1 overflow-y-auto py-4">
+            {/* ✅ Encabezado del menú en móvil con botón de cierre */}
+            <div className="lg:hidden flex items-center justify-between px-4 py-3 border-b border-slate-200">
+              <h1 className="text-lg font-bold text-slate-800">Menú</h1>
+              <button
+                onClick={() => setMobileMenuOpen(false)}
+                className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* ✅ CORRECCIÓN CLAVE: min-h-0 permite que el scroll interno funcione
+                y TODO el menú (incluido Servicios Técnicos) sea alcanzable */}
+            <nav className="flex-1 min-h-0 overflow-y-auto py-4">
               <div className="px-3 space-y-1">
                 {menuItems.map((item) => {
                   const Icon = item.icon
@@ -211,7 +230,6 @@ export default function Layout() {
                       <ChevronRight className="w-4 h-4" />
                     )}
                   </button>
-
                   {catalogosOpen && (
                     <div className="ml-4 mt-1 space-y-1 border-l-2 border-slate-200 pl-3">
                       {subMenuCatalogos.items.map((item) => {
@@ -239,8 +257,8 @@ export default function Layout() {
               </div>
             </nav>
 
-            {/* Footer con usuario */}
-            <div className="hidden lg:block border-t border-slate-200 p-4">
+            {/* ✅ Footer con usuario visible también en móvil */}
+            <div className="border-t border-slate-200 p-4">
               <div className="flex items-center justify-between">
                 <div className="text-sm">
                   <p className="font-medium text-slate-700 truncate max-w-[150px]">{user?.email}</p>
@@ -265,8 +283,8 @@ export default function Layout() {
           />
         )}
 
-        {/* Contenido principal */}
-        <main className="flex-1 p-4 lg:p-8 overflow-x-hidden">
+        {/* ✅ min-w-0 evita que tablas anchas desborden el contenedor en móvil */}
+        <main className="flex-1 min-w-0 p-4 lg:p-8 overflow-x-hidden">
           <Outlet />
         </main>
       </div>
