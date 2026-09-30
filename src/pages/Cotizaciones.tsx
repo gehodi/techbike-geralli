@@ -68,6 +68,8 @@ export default function Cotizaciones() {
   const [totalRegistros, setTotalRegistros] = useState(0)
   const [generandoPDF, setGenerandoPDF] = useState(false)
   const contenidoRef = useRef<HTMLDivElement>(null)
+  // ✅ NUEVO: referencia al formulario para desplazar la vista al editar (móvil)
+  const formRef = useRef<HTMLDivElement>(null)
   const [formData, setFormData] = useState({
     solicitud_id: '', fecha_cotizacion: '', fecha_entrega_estimada: '', notas: ''
   })
@@ -89,7 +91,6 @@ export default function Cotizaciones() {
   async function fetchCotizaciones() {
     try {
       setLoading(true)
-
       let countQuery = supabase.from('cotizaciones').select('*', { count: 'exact', head: true })
       if (searchTerm) {
         const term = `%${searchTerm}%`
@@ -101,10 +102,8 @@ export default function Cotizaciones() {
       const { count, error: countError } = await countQuery
       if (countError) throw countError
       setTotalRegistros(count || 0)
-
       const from = (paginaActual - 1) * registrosPorPagina
       const to = from + registrosPorPagina - 1
-
       let query = supabase
         .from('cotizaciones')
         .select(`*, solicitudes_servicio (
@@ -115,7 +114,6 @@ export default function Cotizaciones() {
         )`)
         .order('fecha_cotizacion', { ascending: false })
         .range(from, to)
-
       if (searchTerm) {
         const term = `%${searchTerm}%`
         const esNumero = /^\d+$/.test(searchTerm.trim())
@@ -123,10 +121,8 @@ export default function Cotizaciones() {
         if (esNumero) condiciones.push(`id.eq.${searchTerm.trim()}`)
         query = query.or(condiciones.join(','))
       }
-
       const { data, error } = await query
       if (error) throw error
-
       const procesadas = data?.map((c: any) => ({
         ...c,
         cliente_nombre: c.solicitudes_servicio?.clientes
@@ -137,9 +133,7 @@ export default function Cotizaciones() {
           : 'Sin bicicleta',
         bicicleta_foto: c.solicitudes_servicio?.bicicletas?.foto_principal_url || null
       })) || []
-
       setCotizaciones(procesadas)
-
       if (data && data.length === 0 && paginaActual > 1) {
         setPaginaActual(1)
       }
@@ -263,11 +257,11 @@ export default function Cotizaciones() {
 
   const eliminarServicio = (id: string) => setDetalleServicios(detalleServicios.filter(i => i.id !== id))
   const eliminarRepuesto = (id: string) => setDetalleRepuestos(detalleRepuestos.filter(i => i.id !== id))
+
   const totalServicios = detalleServicios.reduce((sum, i) => sum + i.subtotal, 0)
   const totalRepuestos = detalleRepuestos.reduce((sum, i) => sum + i.subtotal, 0)
   const granTotal = totalServicios + totalRepuestos
 
-  // ✅ FUNCIÓN PARA GENERAR PDF DE COTIZACIÓN INDIVIDUAL
   async function generarPDFCotizacionIndividual(cotizacionId: number) {
     try {
       const { data: cotData } = await supabase
@@ -275,41 +269,31 @@ export default function Cotizaciones() {
         .select(`*, solicitudes_servicio ( clientes (nombres, apellidos), bicicletas (marca, modelo) )`)
         .eq('id', cotizacionId)
         .single()
-
       if (!cotData) return
-
       const { data: detalleData } = await supabase
         .from('detalle_cotizaciones')
         .select('*')
         .eq('cotizacion_id', cotizacionId)
-
       if (!detalleData) return
-
       const serviciosDet = detalleData.filter((d: any) => d.tipo === 'servicio')
       const repuestosDet = detalleData.filter((d: any) => d.tipo === 'repuesto')
-
       const { default: jsPDF } = await import('jspdf')
       const doc = new jsPDF()
-
       const clienteNombre = cotData.solicitudes_servicio?.clientes
         ? `${cotData.solicitudes_servicio.clientes.nombres} ${cotData.solicitudes_servicio.clientes.apellidos}`
         : 'Sin cliente'
       const bicicletaInfo = cotData.solicitudes_servicio?.bicicletas
         ? `${cotData.solicitudes_servicio.bicicletas.marca} ${cotData.solicitudes_servicio.bicicletas.modelo}`
         : 'Sin bicicleta'
-
       doc.setFontSize(18)
       doc.setTextColor(30, 41, 59)
       doc.setFont('helvetica', 'bold')
       doc.text('COTIZACIÓN DE SERVICIO', 105, 20, { align: 'center' })
-      
       doc.setFontSize(12)
       doc.text(`N° ${cotizacionId}`, 105, 28, { align: 'center' })
-      
       doc.setDrawColor(30, 41, 59)
       doc.setLineWidth(0.5)
       doc.line(10, 33, 200, 33)
-
       doc.setFontSize(10)
       doc.setFont('helvetica', 'normal')
       doc.setTextColor(50, 50, 50)
@@ -319,16 +303,13 @@ export default function Cotizaciones() {
       if (cotData.fecha_entrega_estimada) {
         doc.text(`Entrega estimada: ${new Date(cotData.fecha_entrega_estimada).toLocaleDateString('es-CO')}`, 14, 60)
       }
-
       let startY = 70
-
       if (serviciosDet.length > 0) {
         doc.setFontSize(11)
         doc.setFont('helvetica', 'bold')
         doc.setTextColor(30, 41, 59)
         doc.text('SERVICIOS TÉCNICOS', 14, startY)
         startY += 5
-
         const { default: autoTable } = await import('jspdf-autotable')
         autoTable(doc, {
           startY: startY,
@@ -343,18 +324,15 @@ export default function Cotizaciones() {
           headStyles: { fillColor: [59, 130, 246], textColor: 255 },
           styles: { fontSize: 9 }
         })
-
         startY = (doc as any).lastAutoTable?.finalY ?? startY + 20
         startY += 8
       }
-
       if (repuestosDet.length > 0) {
         doc.setFontSize(11)
         doc.setFont('helvetica', 'bold')
         doc.setTextColor(30, 41, 59)
         doc.text('REPUESTOS Y MATERIALES', 14, startY)
         startY += 5
-
         const { default: autoTable } = await import('jspdf-autotable')
         autoTable(doc, {
           startY: startY,
@@ -369,26 +347,21 @@ export default function Cotizaciones() {
           headStyles: { fillColor: [34, 197, 94], textColor: 255 },
           styles: { fontSize: 9 }
         })
-
         startY = (doc as any).lastAutoTable?.finalY ?? startY + 20
         startY += 8
       }
-
       const totalServ = serviciosDet.reduce((sum: number, s: any) => sum + Number(s.subtotal || 0), 0)
       const totalRep = repuestosDet.reduce((sum: number, r: any) => sum + Number(r.subtotal || 0), 0)
-      const granTotal = totalServ + totalRep
-
+      const total = totalServ + totalRep
       doc.setFontSize(10)
       doc.setFont('helvetica', 'normal')
       doc.setTextColor(50, 50, 50)
       doc.text(`Total Servicios: $${totalServ.toFixed(2)}`, 140, startY)
       doc.text(`Total Repuestos: $${totalRep.toFixed(2)}`, 140, startY + 6)
-      
       doc.setFontSize(12)
       doc.setFont('helvetica', 'bold')
       doc.setTextColor(37, 99, 235)
-      doc.text(`TOTAL: $${granTotal.toFixed(2)}`, 140, startY + 14)
-
+      doc.text(`TOTAL: $${total.toFixed(2)}`, 140, startY + 14)
       if (cotData.notas) {
         startY += 25
         doc.setFontSize(10)
@@ -400,13 +373,11 @@ export default function Cotizaciones() {
         const notasLines = doc.splitTextToSize(cotData.notas, 180)
         doc.text(notasLines, 14, startY + 6)
       }
-
       const fecha = new Date().toLocaleDateString('es-CO')
       doc.setFontSize(8)
       doc.setTextColor(100, 116, 139)
       doc.text(`Generado el: ${fecha}`, 105, 285, { align: 'center' })
       doc.text('Space Bike - Sistema de Gestión', 105, 290, { align: 'center' })
-
       doc.save(`Cotizacion_${cotizacionId}.pdf`)
     } catch (error: any) {
       console.error('Error generando PDF individual:', error)
@@ -445,13 +416,10 @@ export default function Cotizaciones() {
           descripcion: r.nombre, cantidad: r.cantidad, precio_unitario: r.precio_unitario, subtotal: r.subtotal
         })))
       }
-      
-      // ✅ GENERAR PDF AUTOMÁTICAMENTE DESPUÉS DE GUARDAR/ACTUALIZAR
       if (cotizacionId) {
         toast.success('Generando PDF automáticamente...')
         await generarPDFCotizacionIndividual(cotizacionId)
       }
-
       if (!editingId) {
         resetForm(); fetchCotizaciones(); fetchSolicitudesDisponibles()
       } else {
@@ -542,6 +510,7 @@ export default function Cotizaciones() {
     }
   }
 
+  // ✅ CORREGIDO: al editar, desplaza la vista hasta el formulario (crítico en móvil)
   function handleEdit(c: Cotizacion) {
     if (c.estado === 'Aprobada') {
       toast.error('No se puede modificar una cotización ya aprobada')
@@ -551,7 +520,12 @@ export default function Cotizaciones() {
       solicitud_id: c.solicitud_id?.toString() || '', fecha_cotizacion: c.fecha_cotizacion,
       fecha_entrega_estimada: c.fecha_entrega_estimada || '', notas: c.notas || ''
     })
-    setEditingId(c.id); setShowForm(true); fetchDetalleCotizacion(c.id)
+    setEditingId(c.id)
+    setShowForm(true)
+    fetchDetalleCotizacion(c.id)
+    setTimeout(() => {
+      formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 100)
   }
 
   async function handleDelete(id: number) {
@@ -579,10 +553,8 @@ export default function Cotizaciones() {
       toast.error('No se puede capturar el contenido')
       return
     }
-
     setGenerandoPDF(true)
     const toastId = toast.loading('Generando PDF...')
-
     try {
       const { toPng } = await import('html-to-image')
       const dataUrl = await toPng(contenidoRef.current, {
@@ -591,14 +563,11 @@ export default function Cotizaciones() {
         backgroundColor: '#f8fafc',
         cacheBust: true
       })
-
       const { default: jsPDF } = await import('jspdf')
       const imgWidth = 210
       const pdf = new jsPDF('p', 'mm', 'a4')
-
       const img = new Image()
       img.src = dataUrl
-
       await new Promise((resolve) => {
         img.onload = () => {
           const ratio = Math.min(
@@ -608,13 +577,11 @@ export default function Cotizaciones() {
           const finalWidth = img.width * ratio
           const finalHeight = img.height * ratio
           const x = (imgWidth - finalWidth) / 2
-
           pdf.addImage(dataUrl, 'PNG', x, 10, finalWidth, finalHeight)
           pdf.save(`Cotizaciones_${new Date().toISOString().split('T')[0]}.pdf`)
           resolve(true)
         }
       })
-
       toast.dismiss(toastId)
       toast.success('PDF generado correctamente')
     } catch (error: any) {
@@ -634,7 +601,9 @@ export default function Cotizaciones() {
       default: return 'bg-gray-100 text-gray-800'
     }
   }
+
   const formatDate = (d: string) => d ? new Date(d).toLocaleDateString('es-CO') : '-'
+
   const formatCurrency = (v: number | null | undefined) => {
     if (v === null || v === undefined) return '$0.00'
     return new Intl.NumberFormat('en-US', {
@@ -680,7 +649,7 @@ export default function Cotizaciones() {
   }
 
   return (
-    <div className="space-y-6 p-8">
+    <div className="space-y-6 p-4 lg:p-8">
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Cotizaciones</h1>
@@ -711,7 +680,7 @@ export default function Cotizaciones() {
       </div>
 
       {showForm && (
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+        <div ref={formRef} className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 scroll-mt-20">
           <h2 className="text-lg font-semibold text-slate-800 mb-4">{editingId ? `Editar Cotización #${editingId}` : 'Nueva Cotización'}</h2>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -774,19 +743,16 @@ export default function Cotizaciones() {
         </div>
       )}
 
-      {/* Contenido que se capturará en el PDF del listado */}
-      <div ref={contenidoRef} className="bg-slate-50 p-6 rounded-lg">
+      <div ref={contenidoRef} className="bg-slate-50 p-4 lg:p-6 rounded-lg">
         <div className="relative">
           <Search className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
           <input type="text" placeholder="Buscar por ID, notas o estado..." value={searchTerm} onChange={(e) => { setSearchTerm(e.target.value); setPaginaActual(1) }} className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
         </div>
-
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mt-4">
           {loading ? (<div className="p-8 text-center text-slate-500">Cargando...</div>) : cotizaciones.length === 0 ? (
             <div className="p-8 text-center text-slate-500">{searchTerm ? 'No se encontraron cotizaciones' : 'No hay cotizaciones registradas'}</div>
           ) : (
             <>
-              {/* ✅ CORRECCIÓN: Contenedor con overflow-x-auto para sticky */}
               <div className="overflow-x-auto">
                 <div className="min-w-[1100px]">
                   <table className="w-full">
@@ -799,7 +765,6 @@ export default function Cotizaciones() {
                         <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Fecha</th>
                         <th className="text-right px-6 py-3 text-sm font-medium text-slate-700">Total</th>
                         <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Estado</th>
-                        {/* ✅ CORRECCIÓN: Sticky con position sticky explícito */}
                         <th className="sticky right-0 bg-slate-50 border-l-2 border-slate-200 px-6 py-3 text-sm font-medium text-slate-700 z-10 shadow-[-4px_0_6px_-1px_rgba(0,0,0,0.05)]" style={{ position: 'sticky', right: 0 }}>Acciones</th>
                       </tr>
                     </thead>
@@ -819,7 +784,6 @@ export default function Cotizaciones() {
                           <td className="px-6 py-4 text-sm text-slate-600">{formatDate(c.fecha_cotizacion)}</td>
                           <td className="px-6 py-4 text-sm text-right font-medium">{formatCurrency(c.total)}</td>
                           <td className="px-6 py-4"><span className={`px-2 py-1 rounded-full text-xs font-medium ${getEstadoColor(c.estado)}`}>{c.estado}</span></td>
-                          {/* ✅ CORRECCIÓN: Sticky con position sticky explícito */}
                           <td className="sticky right-0 bg-white group-hover:bg-slate-50 border-l-2 border-slate-200 px-6 py-4 text-right z-10 shadow-[-4px_0_6px_-1px_rgba(0,0,0,0.05)]" style={{ position: 'sticky', right: 0 }} onClick={(e) => e.stopPropagation()}>
                             <div className="flex justify-end gap-2">
                               <button onClick={() => setModalDetalle(c)} className="p-2 text-slate-600 hover:bg-slate-100 rounded" title="Ver detalle"><Eye className="w-4 h-4" /></button>

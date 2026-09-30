@@ -98,7 +98,7 @@ export default function Reportes() {
     { id: 2, titulo: 'Órdenes por Estado', descripcion: 'Listado por estado, agrupado y totalizado por tipo de orden', icono: <ClipboardList className="w-8 h-8" />, color: 'bg-green-500' },
     { id: 3, titulo: 'Detalle de Orden Completada', descripcion: 'Ver detalle completo de una orden de servicio', icono: <TrendingUp className="w-8 h-8" />, color: 'bg-purple-500' },
     { id: 4, titulo: 'Listado de Inventario', descripcion: 'Inventario completo con existencias reales', icono: <Package className="w-8 h-8" />, color: 'bg-orange-500' },
-    { id: 5, titulo: 'Órdenes por Mecánico', descripcion: 'Órdenes asignadas por mecánico, agrupadas por tipo', icono: <Wrench className="w-8 h-8" />, color: 'bg-red-500' },
+    { id: 5, titulo: 'Órdenes por Mecánico', descripcion: 'Ingresos y mano de obra (solo completadas) por mecánico', icono: <Wrench className="w-8 h-8" />, color: 'bg-red-500' },
     { id: 6, titulo: 'Ingresos por Órdenes', descripcion: 'Informe de ingresos solo por órdenes de clientes', icono: <DollarSign className="w-8 h-8" />, color: 'bg-emerald-500' }
   ]
 
@@ -151,7 +151,6 @@ export default function Reportes() {
 
   const formatDate = (d: string) => d ? new Date(d).toLocaleDateString('es-CO') : '-'
 
-  // ✅ CORREGIDO: sin parámetros sin usar
   const piePagina = () => `Generado: ${new Date().toLocaleDateString('es-CO')} - Space Bike - Sistema de Gestión`
 
   const procesarOrdenParaReporte = (o: any) => {
@@ -174,10 +173,19 @@ export default function Reportes() {
     }
   }
 
-  // Regla de negocio: valor acumulable como ingreso (solo clientes acumulan)
+  // Mano de obra de la orden = ítems de servicio valorados a costo_mano_obra del catálogo
+  const manoDeObraDeOrden = (o: any): number =>
+    (o.detalle_ordenes_servicio || [])
+      .filter((d: any) => d.tipo === 'servicio')
+      .reduce((sum: number, d: any) => {
+        const costoManoObra = d.servicios && d.servicios.costo_mano_obra != null
+          ? toNum(d.servicios.costo_mano_obra)
+          : toNum(d.precio_unitario)
+        return sum + toNum(d.cantidad) * costoManoObra
+      }, 0)
+
   const valorOrden = (o: any): number => (o.estado === 'Completada' ? o.costo_real : o.costo_estimado)
 
-  // ✅ CORREGIDO: tuplas de color tipadas explícitamente
   const armarGrupos = (ordenes: any[]): GrupoOrden[] => [
     { key: 'cliente', titulo: 'ÓRDENES DE CLIENTE (TALLER)', color: [37, 99, 235] as [number, number, number], items: ordenes.filter(o => o.tipo_orden === 'cliente') },
     { key: 'interna', titulo: 'ÓRDENES INTERNAS (REACONDICIONAMIENTO)', color: [22, 163, 74] as [number, number, number], items: ordenes.filter(o => o.tipo_orden === 'interna_bicicleta_usada') },
@@ -212,7 +220,7 @@ export default function Reportes() {
     }
   }
 
-  // ========== REPORTE 2: ÓRDENES POR ESTADO (PDF local agrupado por tipo) ==========
+  // ========== REPORTE 2: ÓRDENES POR ESTADO ==========
   const generarOrdenesDesdeBD = async (estado: string) => {
     const { data: ordenes, error } = await supabase
       .from('ordenes_servicio')
@@ -225,7 +233,6 @@ export default function Reportes() {
     }
     const procesadas = ordenes.map(procesarOrdenParaReporte)
     const grupos = armarGrupos(procesadas)
-
     const doc = new jsPDF()
     doc.setFontSize(16)
     doc.text('ÓRDENES DE SERVICIO', 14, 16)
@@ -233,13 +240,11 @@ export default function Reportes() {
     doc.text(`Estado: ${estado}`, 14, 24)
     doc.setFontSize(9)
     doc.text(piePagina(), 14, 30)
-
     let y = 38
     let ingresos = 0
     let costoInterno = 0
     let totalOrdenes = 0
     let totalCompletadas = 0
-
     for (const g of grupos) {
       const completadas = g.items.filter(o => o.estado === 'Completada')
       const valor = g.items.reduce((s, o) => s + valorOrden(o), 0)
@@ -247,12 +252,10 @@ export default function Reportes() {
       totalCompletadas += completadas.length
       if (g.key === 'cliente') ingresos += valor
       else costoInterno += valor
-
       doc.setFontSize(12)
       doc.setTextColor(g.color[0], g.color[1], g.color[2])
       doc.text(g.titulo, 14, y)
       doc.setTextColor(0, 0, 0)
-
       autoTable(doc, {
         startY: y + 3,
         head: [['N° Orden', 'Cliente / Ref.', 'Bicicleta', 'Mecánico', 'Ingreso', 'Costo Estimado', 'Costo Real']],
@@ -275,7 +278,6 @@ export default function Reportes() {
       })
       y = (doc as any).lastAutoTable.finalY + 10
     }
-
     autoTable(doc, {
       startY: y,
       head: [['RESUMEN POR TIPO DE ORDEN', 'Órdenes', 'Completadas', 'Valor']],
@@ -292,7 +294,6 @@ export default function Reportes() {
       headStyles: { fillColor: [51, 65, 85] },
       footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' }
     })
-
     doc.save(`Ordenes_Estado_${estado.replace(/\s+/g, '_')}.pdf`)
     toast.success('Reporte de órdenes generado (agrupado por tipo)')
   }
@@ -367,7 +368,9 @@ export default function Reportes() {
     }
   }
 
-  // ========== REPORTE 5: ÓRDENES POR MECÁNICO (PDF local agrupado por tipo) ==========
+  // ========== REPORTE 5: ÓRDENES POR MECÁNICO ==========
+  // ✅ REGLA FINAL: el TOTAL A PAGAR al mecánico suma SOLO la mano de obra de órdenes de CLIENTE.
+  // Las internas/garantía se administran aparte con el subtotal de su agrupación.
   const generarOrdenesMecanicoDesdeBD = async (mecanicoIdParam: number, inicio: string, fin: string) => {
     const { data: mecanico } = await supabase
       .from('mecanicos')
@@ -376,7 +379,7 @@ export default function Reportes() {
       .single()
     const { data: ordenes, error } = await supabase
       .from('ordenes_servicio')
-      .select(`*, clientes (nombres, apellidos), bicicletas (marca, modelo), bicicletas_adquiridas (codigo_inventario, marca, modelo)`)
+      .select(`*, clientes (nombres, apellidos), bicicletas (marca, modelo), bicicletas_adquiridas (codigo_inventario, marca, modelo), detalle_ordenes_servicio (tipo, cantidad, precio_unitario, subtotal, servicios (costo_mano_obra))`)
       .eq('mecanico_id', mecanicoIdParam)
       .gte('fecha_ingreso', inicio)
       .lte('fecha_ingreso', fin)
@@ -385,9 +388,12 @@ export default function Reportes() {
       toast.error('No hay datos para el rango seleccionado')
       return
     }
-    const procesadas = ordenes.map(procesarOrdenParaReporte)
+    const ordenesProcesadas = ordenes.map(o => ({
+      ...procesarOrdenParaReporte(o),
+      mano_obra: manoDeObraDeOrden(o)
+    }))
     const nombreMecanico = `${mecanico.nombres} ${mecanico.apellidos}`
-    const grupos = armarGrupos(procesadas)
+    const grupos = armarGrupos(ordenesProcesadas)
     if (grupos.length === 0) {
       toast.error('No hay órdenes para este mecánico en el rango')
       return
@@ -401,20 +407,32 @@ export default function Reportes() {
     doc.text(`Rango de ingreso: ${inicio} al ${fin}`, 14, 30)
     doc.setFontSize(9)
     doc.text(piePagina(), 14, 36)
+    doc.setFontSize(8)
+    doc.setTextColor(120, 120, 120)
+    doc.text('Nota: filas en color = órdenes NO completadas (informativas). Solo las COMPLETADAS acumulan.', 14, 41)
+    doc.text('La mano de obra a pagar corresponde SOLO a órdenes de cliente; internas/garantía se administran con el subtotal de su grupo.', 14, 45)
+    doc.setTextColor(0, 0, 0)
 
-    let y = 44
+    let y = 50
     let ingresosCliente = 0
     let costoInterno = 0
+    let manoObraTotal = 0
     let totalOrdenes = 0
     let totalCompletadas = 0
 
     for (const g of grupos) {
       const completadas = g.items.filter(o => o.estado === 'Completada')
       const montoCompletadas = completadas.reduce((s, o) => s + o.costo_real, 0)
+      const manoObraCompletadas = completadas.reduce((s, o) => s + o.mano_obra, 0)
       totalOrdenes += g.items.length
       totalCompletadas += completadas.length
-      if (g.key === 'cliente') ingresosCliente += montoCompletadas
-      else costoInterno += montoCompletadas
+      // ✅ Solo cliente suma al total a pagar; internas/garantía quedan en su propio subtotal
+      if (g.key === 'cliente') {
+        ingresosCliente += montoCompletadas
+        manoObraTotal += manoObraCompletadas
+      } else {
+        costoInterno += montoCompletadas
+      }
 
       doc.setFontSize(12)
       doc.setTextColor(g.color[0], g.color[1], g.color[2])
@@ -423,37 +441,57 @@ export default function Reportes() {
 
       autoTable(doc, {
         startY: y + 3,
-        head: [['N° Orden', 'Cliente / Ref.', 'Bicicleta', 'Estado', 'Ingreso', 'Costo Real']],
+        head: [['N° Orden', 'Cliente / Ref.', 'Bicicleta', 'Estado', 'Mano de Obra', 'Costo Real']],
         body: g.items.map(o => [
           o.numero_orden || 'S/N',
           o.cliente_nombre,
           o.bicicleta_info,
           o.estado,
-          formatDate(o.fecha_ingreso),
+          money(o.mano_obra),
           money(o.costo_real)
         ]),
         foot: [[
-          { content: `Subtotal ${g.items.length} órdenes (${completadas.length} completadas):`, colSpan: 5, styles: { halign: 'right' } },
+          { content: `Acumulado SOLO COMPLETADAS (${completadas.length} de ${g.items.length} órdenes):`, colSpan: 4, styles: { halign: 'right' } },
+          { content: money(manoObraCompletadas), styles: { halign: 'right' } },
           { content: money(montoCompletadas), styles: { halign: 'right' } }
         ]],
         styles: { fontSize: 9 },
         headStyles: { fillColor: g.color },
-        footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' }
+        footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' },
+        didParseCell: (data: any) => {
+          if (data.section !== 'body') return
+          const orden = g.items[data.row.index]
+          if (!orden || orden.estado === 'Completada') return
+          if (orden.estado === 'Cancelada') {
+            data.cell.styles.fillColor = [248, 215, 215]
+            data.cell.styles.textColor = [155, 44, 44]
+          } else {
+            data.cell.styles.fillColor = [255, 240, 200]
+            data.cell.styles.textColor = [146, 100, 8]
+          }
+        }
       })
       y = (doc as any).lastAutoTable.finalY + 10
     }
 
     autoTable(doc, {
       startY: y,
-      head: [['RESUMEN POR TIPO DE ORDEN', 'Órdenes', 'Completadas', 'Monto Completadas']],
+      head: [['RESUMEN POR TIPO DE ORDEN', 'Órdenes', 'Completadas', 'Mano de Obra', 'Monto Completadas']],
       body: grupos.map(g => {
         const comp = g.items.filter(o => o.estado === 'Completada')
-        return [g.titulo, String(g.items.length), String(comp.length), money(comp.reduce((s, o) => s + o.costo_real, 0))]
+        return [
+          g.titulo,
+          String(g.items.length),
+          String(comp.length),
+          money(comp.reduce((s, o) => s + o.mano_obra, 0)),
+          money(comp.reduce((s, o) => s + o.costo_real, 0))
+        ]
       }),
       foot: [
-        [{ content: `TOTAL ÓRDENES: ${totalOrdenes} | COMPLETADAS: ${totalCompletadas}`, colSpan: 4, styles: { halign: 'center' } }],
-        [{ content: 'INGRESOS REALES (solo órdenes de cliente):', colSpan: 3, styles: { halign: 'right' } }, { content: money(ingresosCliente), styles: { halign: 'right' } }],
-        [{ content: 'COSTO INTERNO (internas + garantía, NO es ingreso):', colSpan: 3, styles: { halign: 'right' } }, { content: money(costoInterno), styles: { halign: 'right' } }]
+        [{ content: `TOTAL ÓRDENES: ${totalOrdenes} | COMPLETADAS: ${totalCompletadas}`, colSpan: 5, styles: { halign: 'center' } }],
+        [{ content: 'INGRESOS REALES (solo órdenes de cliente):', colSpan: 4, styles: { halign: 'right' } }, { content: money(ingresosCliente), styles: { halign: 'right' } }],
+        [{ content: 'COSTO INTERNO (internas + garantía completadas):', colSpan: 4, styles: { halign: 'right' } }, { content: money(costoInterno), styles: { halign: 'right' } }],
+        [{ content: 'TOTAL MANO DE OBRA A PAGAR AL MECÁNICO (solo órdenes de cliente):', colSpan: 4, styles: { halign: 'right' } }, { content: money(manoObraTotal), styles: { halign: 'right' } }]
       ],
       styles: { fontSize: 9 },
       headStyles: { fillColor: [51, 65, 85] },
@@ -461,10 +499,10 @@ export default function Reportes() {
     })
 
     doc.save(`Ordenes_Mecanico_${nombreMecanico.replace(/\s+/g, '_')}_${inicio}_a_${fin}.pdf`)
-    toast.success('Reporte por mecánico generado (agrupado por tipo)')
+    toast.success('Reporte por mecánico generado (pago solo de órdenes de cliente)')
   }
 
-  // ========== REPORTE 6: INGRESOS (PDF local, SOLO clientes) ==========
+  // ========== REPORTE 6: INGRESOS (SOLO clientes) ==========
   const generarIngresosDesdeBD = async (inicio: string, fin: string) => {
     const { data: ordenes, error } = await supabase
       .from('ordenes_servicio')
@@ -491,8 +529,6 @@ export default function Reportes() {
         total_repuestos: totalRepuestos
       }
     })
-
-    // ✅ CORREGIDO: totales calculados Y usados en el pie del PDF
     const totalServ = procesadas.reduce((s, o) => s + o.total_servicios, 0)
     const totalRep = procesadas.reduce((s, o) => s + o.total_repuestos, 0)
     const granTotal = procesadas.reduce((s, o) => s + o.costo_real, 0)
@@ -505,7 +541,6 @@ export default function Reportes() {
     doc.setFontSize(9)
     doc.text('Incluye únicamente órdenes de servicio a clientes (las internas y garantías no generan ingreso).', 14, 30)
     doc.text(piePagina(), 14, 36)
-
     autoTable(doc, {
       startY: 42,
       head: [['N° Orden', 'Cliente', 'Bicicleta', 'Entrega', 'Servicios', 'Repuestos', 'Total']],
@@ -526,7 +561,6 @@ export default function Reportes() {
       headStyles: { fillColor: [5, 150, 105] },
       footStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0], fontStyle: 'bold' }
     })
-
     doc.save(`Ingresos_${inicio}_a_${fin}.pdf`)
     toast.success('Informe de ingresos generado (solo clientes)')
   }
