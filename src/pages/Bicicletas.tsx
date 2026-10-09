@@ -24,6 +24,10 @@ interface Bicicleta {
 interface Cliente { id: string; nombres: string; apellidos: string }
 interface TipoBicicleta { id: number; nombre: string }
 
+// ✅ Solo formatos que TODOS los navegadores pueden mostrar
+const TIPOS_VALIDOS = ['image/jpeg', 'image/png', 'image/webp']
+const EXT_POR_TIPO: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }
+
 export default function Bicicletas() {
   const formRef = useRef<HTMLDivElement>(null)
   const [bicicletas, setBicicletas] = useState<Bicicleta[]>([])
@@ -79,31 +83,40 @@ export default function Bicicletas() {
     setTiposBicicleta(data || [])
   }
 
+  // ✅ VALIDACIÓN ESTRICTA: bloquea HEIC/HEIF y formatos no mostrables
   function handleFotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
-    if (file) {
-      if (!file.type.startsWith('image/')) {
-        toast.error('Solo se permiten imágenes')
-        return
-      }
-      if (file.size > 5 * 1024 * 1024) {
-        toast.error('La imagen no debe superar los 5MB')
-        return
-      }
-      setFotoFile(file)
-      setFotoPreview(URL.createObjectURL(file))
+    if (!file) return
+    if (file.type === 'image/heic' || file.type === 'image/heif') {
+      toast.error('Esa foto está en formato HEIC y el navegador no puede mostrarla. Elige una JPG/PNG, o toma una captura de pantalla de la foto y sube la captura.')
+      e.target.value = ''
+      return
     }
+    if (!TIPOS_VALIDOS.includes(file.type)) {
+      toast.error('Formato no soportado. Usa imágenes JPG, PNG o WEBP.')
+      e.target.value = ''
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error(`La imagen pesa ${(file.size / 1024 / 1024).toFixed(1)}MB y el máximo es 5MB.`)
+      e.target.value = ''
+      return
+    }
+    setFotoFile(file)
+    setFotoPreview(URL.createObjectURL(file))
   }
 
+  // ✅ Subida con contentType y extensión derivados del MIME (nunca .heic)
   async function uploadFoto(file: File, bicicletaId: string): Promise<string | null> {
     try {
-      const fileExt = file.name.split('.').pop()
-      const fileName = `${bicicletaId}/${Date.now()}.${fileExt}`
+      const ext = EXT_POR_TIPO[file.type] || 'jpg'
+      const fileName = `${bicicletaId}/${Date.now()}.${ext}`
       const { error: uploadError } = await supabase.storage
         .from('fotos-bicicletas')
         .upload(fileName, file, {
           cacheControl: '3600',
-          upsert: false
+          upsert: false,
+          contentType: file.type
         })
       if (uploadError) throw uploadError
       const { data: { publicUrl } } = supabase.storage
@@ -259,6 +272,11 @@ export default function Bicicletas() {
                       src={fotoPreview}
                       alt="Foto bicicleta"
                       className="h-32 w-32 object-cover rounded-lg border-2 border-slate-200"
+                      onError={() => {
+                        toast.error('El navegador no puede mostrar este archivo. Elige una imagen JPG o PNG.')
+                        setFotoFile(null)
+                        setFotoPreview(null)
+                      }}
                     />
                     <button
                       type="button"
@@ -277,15 +295,15 @@ export default function Bicicletas() {
                   <label className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 text-sm w-fit">
                     <Upload className="w-4 h-4 text-slate-600" />
                     <span>{fotoFile ? 'Cambiar foto' : 'Subir/Cambiar foto'}</span>
-                    {/* ✅ CORREGIDO: sin capture="environment" → el celular ofrece cámara O galería */}
+                    {/* Sin capture: el celular ofrece cámara O galería */}
                     <input
                       type="file"
-                      accept="image/*"
+                      accept="image/jpeg,image/png,image/webp"
                       onChange={handleFotoChange}
                       className="hidden"
                     />
                   </label>
-                  <p className="text-xs text-slate-500 mt-2">Máximo 5MB. En el celular podrás elegir entre tomar foto o subir desde la galería.</p>
+                  <p className="text-xs text-slate-500 mt-2">Máximo 5MB. Formatos aceptados: JPG, PNG, WEBP. En el celular podrás elegir cámara o galería.</p>
                 </div>
               </div>
             </div>
