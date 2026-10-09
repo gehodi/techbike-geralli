@@ -457,7 +457,7 @@ export default function SelectorBicicletaCliente({ clienteId, value, onChange }:
               <label className="flex items-center gap-2 px-3 py-2 bg-white border border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 text-sm">
                 <Camera className="w-4 h-4 text-slate-600" />
                 <span>{photoFile ? 'Cambiar foto' : 'Tomar/Subir foto'}</span>
-                {/* ✅ CORREGIDO: sin capture="environment" → el celular ofrece cámara O galería */}
+                {/* SIN capture: el celular ofrece cámara O galería */}
                 <input
                   type="file"
                   accept="image/*"
