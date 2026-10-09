@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Manual de Usuario - Taller Bike</title>
+<style>
+body { font-family: Calibri, Arial, sans-serif; font-size: 11pt; line-height: 1.5; color: #1f2937; }
+h1 { color: #1e3a8a; font-size: 20pt; text-align: center; }
+h2 { color: #1d4ed8; font-size: 14pt; border-bottom: 2px solid #bfdbfe; padding-bottom: 4px; margin-top: 26px; }
+h3 { color: #1e40af; font-size: 12pt; margin-top: 16px; }
+table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+th, td { border: 1px solid #9ca3af; padding: 6px 8px; font-size: 10pt; text-align: left; vertical-align: top; }
+th { background: #dbeafe; }
+.nota { background: #fef9c3; border-left: 4px solid #facc15; padding: 8px 10px; margin: 10px 0; }
+.importante { background: #fee2e2; border-left: 4px solid #ef4444; padding: 8px 10px; margin: 10px 0; }
+.tip { background: #dcfce7; border-left: 4px solid #22c55e; padding: 8px 10px; margin: 10px 0; }
+.portada { text-align: center; margin-top: 60px; }
+</style>
+</head>
+<body>
+
+<div class="portada">
+<h1>TALLER BIKE<br>Sistema de Gestión del Taller</h1>
+<p><strong>Manual de Usuario</strong><br>Versión 1.0 — Octubre 2026<br>Space Bike</p>
+</div>
+
+<h2>1. Bienvenida</h2>
+<p>Este manual te enseña, paso a paso y en lenguaje sencillo, a utilizar el sistema <strong>Taller Bike</strong>. Aquí podrás registrar clientes, solicitar y cotizar servicios, controlar órdenes de trabajo, administrar el inventario, comprar y vender bicicletas, y generar reportes en PDF.</p>
+<p><strong>¿Qué necesitas?</strong> Un computador o celular con internet y un navegador moderno (Chrome, Edge o el navegador de Samsung).</p>
+<div class="tip">Consejo: en el celular, el menú aparece con el botón de tres líneas (☰) en la parte superior. Desliza el menú hacia abajo para ver todas las opciones.</div>
+
+<h2>2. Entrar y salir del sistema</h2>
+<h3>2.1. Iniciar sesión</h3>
+<ol>
+<li>Abre el navegador y escribe la dirección del sistema.</li>
+<li>Escribe tu <strong>correo electrónico</strong> y tu <strong>contraseña</strong>.</li>
+<li>Presiona <strong>Iniciar sesión</strong>.</li>
+</ol>
+<h3>2.2. Cerrar sesión</h3>
+<p>Presiona el botón de salir (ícono de puerta) en la parte superior (celular) o al final del menú lateral (computador).</p>
+<div class="importante">Por seguridad, cierra sesión siempre que termines de trabajar, especialmente en equipos compartidos.</div>
+
+<h2>3. Página principal (Dashboard)</h2>
+<p>Al entrar verás el resumen general del taller:</p>
+<ul>
+<li><strong>Total Clientes:</strong> clientes registrados.</li>
+<li><strong>Órdenes Pendientes:</strong> trabajos por terminar.</li>
+<li><strong>Stock Bajo:</strong> repuestos que se están acabando (en rojo).</li>
+<li><strong>Ingresos del Mes:</strong> dinero recibido por servicios de clientes completados.</li>
+<li><strong>Garantías por Vencer:</strong> garantías que vencen en los próximos 15 días.</li>
+</ul>
+<p>En la parte inferior están los <strong>Accesos Rápidos</strong>: botones para ir directo a las tareas más comunes (nueva solicitud, nueva cotización, inventario, vender bicicleta, etc.).</p>
+
+<h2>4. Clientes</h2>
+<h3>4.1. Registrar un cliente nuevo</h3>
+<ol>
+<li>En el menú, entra a <strong>Clientes</strong>.</li>
+<li>Presiona <strong>Nuevo Cliente</strong>.</li>
+<li>Escribe nombres, apellidos, teléfono y correo.</li>
+<li>Presiona <strong>Guardar</strong>.</li>
+</ol>
+<h3>4.2. Buscar o editar un cliente</h3>
+<p>Usa el cuadro de búsqueda (escribe nombre o teléfono). Para editar, presiona el lápiz ✏️ en la fila del cliente.</p>
+
+<h2>5. Solicitudes de servicio</h2>
+<p>Una solicitud es el "aviso" de que un cliente quiere un servicio. Aún no tiene precios.</p>
+<ol>
+<li>Entra a <strong>Solicitudes</strong> y presiona <strong>Nueva Solicitud</strong>.</li>
+<li>Selecciona el <strong>cliente</strong> y la <strong>bicicleta</strong>.</li>
+<li>Escribe los <strong>síntomas</strong> (lo que el cliente cuenta) y lo que se observa en el taller.</li>
+<li>Guarda la solicitud.</li>
+</ol>
+<p>Cuando revises la solicitud podrás <strong>Aprobarla</strong> para pasar a cotizarla.</p>
+
+<h2>6. Cotizaciones</h2>
+<p>La cotización es el presupuesto que se entrega al cliente.</p>
+<h3>6.1. Crear una cotización</h3>
+<ol>
+<li>Entra a <strong>Cotizaciones</strong> y presiona <strong>Nueva Cotización</strong>.</li>
+<li>Selecciona la <strong>solicitud aprobada</strong> (solo aparecen las que aún no tienen cotización).</li>
+<li>Agrega <strong>Servicios Técnicos</strong> (mano de obra) y <strong>Repuestos y Materiales</strong> con sus cantidades.</li>
+<li>Revisa el <strong>GRAN TOTAL</strong> y presiona <strong>Guardar</strong>.</li>
+<li>El sistema descarga automáticamente el <strong>PDF de la cotización</strong> para entregar al cliente.</li>
+</ol>
+<h3>6.2. Aprobar la cotización y crear la orden</h3>
+<p>Cuando el cliente acepta, presiona el botón verde ✔️ <strong>Aprobar</strong>. El sistema crea automáticamente la <strong>Orden de Servicio</strong> (número ORD-XXX) y <strong>aparta (reserva) los repuestos</strong> en el inventario.</p>
+<div class="nota">Una cotización aprobada ya no se puede editar ni eliminar, para proteger el historial.</div>
+
+<h2>7. Órdenes de Servicio (cliente)</h2>
+<ol>
+<li>Entra a <strong>Órdenes de Servicio</strong>.</li>
+<li>Cada orden muestra su estado: <strong>Pendiente</strong> (amarillo), <strong>En Proceso</strong> (azul), <strong>Completada</strong> (verde) o <strong>Cancelada</strong> (rojo).</li>
+<li>Con el ojo 👁️ ves el detalle; con el lápiz ✏️ editas (mientras no esté completada).</li>
+<li>Al completarla, el botón verde te lleva al detalle final con la comparación <strong>Cotización vs Orden Ejecutada</strong> (qué se cotizó y qué se hizo realmente).</li>
+</ol>
+
+<h2>8. Órdenes Internas (bicicletas usadas y garantías)</h2>
+<p>Son trabajos que <strong>no se cobran a un cliente</strong>: el reacondicionamiento de bicicletas compradas usadas y las reparaciones por garantía. Se pagan "al costo".</p>
+<ol>
+<li>Entra a <strong>Órdenes Internas</strong> y presiona <strong>Nueva Orden Interna</strong>.</li>
+<li>Selecciona la <strong>bicicleta adquirida</strong> y, si quieres, el <strong>mecánico</strong>.</li>
+<li>Agrega servicios (a costo de mano de obra) y repuestos (a costo de compra).</li>
+<li>Guarda. El número <strong>OI-XXX</strong> se genera solo.</li>
+</ol>
+<h3>8.1. Completar una orden interna</h3>
+<ol>
+<li>Presiona el botón verde ✔️ <strong>Completar</strong>.</li>
+<li>Indica cuántas unidades de cada repuesto se <strong>usaron</strong> y cuántas se <strong>dañaron</strong>.</li>
+<li>Confirma. El sistema descuenta el inventario, registra el movimiento y deja la bicicleta <strong>disponible para venta</strong>.</li>
+</ol>
+<div class="nota">Las órdenes de garantía funcionan igual; al completarlas, la reclamación del cliente queda resuelta automáticamente.</div>
+
+<h2>9. Adquisición de bicicletas usadas</h2>
+<ol>
+<li>Entra a <strong>Adquisición Bicicletas</strong>.</li>
+<li>Presiona <strong>Nueva Adquisición</strong>.</li>
+<li>Registra marca, modelo, código, <strong>foto</strong>, costo de compra y comisión del intermediario.</li>
+<li>Guarda. La bicicleta queda en estado <strong>adquirida</strong> y lista para reacondicionar.</li>
+</ol>
+
+<h2>10. Venta de bicicletas</h2>
+<ol>
+<li>Entra a <strong>Ventas Bicicletas</strong> y presiona <strong>Nueva Venta</strong>.</li>
+<li>Selecciona la bicicleta (solo aparecen las <strong>disponibles para venta</strong>, con su foto).</li>
+<li>Revisa el <strong>Análisis de Costos y Rentabilidad</strong> (compra + reparaciones + gastos = costo total, y cuánto ganarás).</li>
+<li>Escribe los datos del cliente y el <strong>precio de venta</strong>.</li>
+<li>Registra los <strong>pagos</strong> (pueden ser varios métodos: efectivo, transferencia, Nequi…). La suma de los pagos debe cuadrar exactamente con el precio.</li>
+<li>Presiona <strong>Confirmar Venta</strong>. El sistema genera la <strong>garantía</strong> y el <strong>Certificado de Reacondicionamiento</strong>.</li>
+</ol>
+<div class="tip">Con el botón morado 🛡️ de cada venta puedes volver a ver o imprimir el certificado.</div>
+
+<h2>11. Garantías y Reclamaciones</h2>
+<ul>
+<li><strong>Garantías:</strong> lista de todas las garantías con su estado (vigente, reclamada, vencida). El aviso amarillo del Dashboard te avisa las que vencen pronto.</li>
+<li><strong>Reclamaciones:</strong> si un cliente con garantía vigente reporta una falla, crea la reclamación con la descripción. Al procesarla se genera una <strong>orden interna de garantía</strong> para el taller.</li>
+</ul>
+
+<h2>12. Mecánicos</h2>
+<p>En <strong>Mecánicos</strong> registras y editas el personal del taller (nombres y apellidos). Luego los asignas en las órdenes para saber quién hizo cada trabajo.</p>
+
+<h2>13. Inventario</h2>
+<ul>
+<li><strong>Inventario:</strong> lista de repuestos y materiales con stock actual, reservado y mínimo. Los que están por acabarse aparecen con alerta roja.</li>
+<li><strong>Solicitudes de Inventario (Reposiciones):</strong> cuando falte algo, crea la solicitud; al aprobarla, el stock aumenta.</li>
+<li><strong>Registro de Daños:</strong> si un repuesto se daña, regístralo para descontarlo y dejar constancia.</li>
+<li><strong>Historial Movimientos:</strong> consulta todos los movimientos (compras, reservas, consumos, daños).</li>
+</ul>
+
+<h2>14. Catálogos</h2>
+<p>En el menú <strong>Catálogos</strong> administras las listas básicas: Categorías, Marcas, Proveedores del Taller, Proveedores de Bicicletas Usadas, Tipos de Bicicletas y Servicios Técnicos (con su costo de mano de obra y precio al cliente).</p>
+
+<h2>15. Reportes en PDF</h2>
+<p>Entra a <strong>Reportes</strong>, elige la tarjeta del reporte, completa los datos pedidos y presiona <strong>Generar PDF</strong>. El archivo se descarga listo para imprimir o enviar.</p>
+<table>
+<tr><th>Reporte</th><th>¿Qué muestra?</th></tr>
+<tr><td>Cotización al Cliente</td><td>Presupuesto en PDF de una cotización.</td></tr>
+<tr><td>Órdenes por Estado</td><td>Listado de órdenes agrupadas por tipo (cliente, internas, garantía).</td></tr>
+<tr><td>Detalle de Orden Completada</td><td>Comparación cotización vs lo ejecutado.</td></tr>
+<tr><td>Listado de Inventario</td><td>Existencias reales del inventario.</td></tr>
+<tr><td>Órdenes por Mecánico</td><td>Trabajos del mecánico en el periodo. Las filas en color son órdenes no terminadas (informativas). Al final muestra los <strong>Ingresos reales</strong>, el <strong>Costo interno</strong> y el <strong>Total de Mano de Obra a pagar</strong> (solo órdenes de cliente completadas).</td></tr>
+<tr><td>Ingresos por Órdenes</td><td>Dinero recibido, únicamente por servicios a clientes.</td></tr>
+</table>
+
+<h2>16. Preguntas frecuentes</h2>
+<table>
+<tr><th>Pregunta</th><th>Respuesta</th></tr>
+<tr><td>¿Por qué no puedo editar una cotización aprobada o una orden completada?</td><td>Para proteger la información histórica y los cálculos de dinero. Si necesitas un cambio, registra una nueva operación.</td></tr>
+<tr><td>¿Por qué no aparece una bicicleta para vender?</td><td>Solo se pueden vender bicicletas en estado "disponible para venta". Si está en reparación, primero completa su orden interna.</td></tr>
+<tr><td>Los pagos no me dejan guardar la venta.</td><td>La suma de los pagos debe ser exactamente igual al precio de venta. Ajusta los montos hasta que aparezca el visto verde ✓.</td></tr>
+<tr><td>En el celular no veo todas las opciones del menú.</td><td>Abre el menú con ☰ y desliza con el dedo hacia abajo dentro del menú; todas las opciones están ahí.</td></tr>
+<tr><td>En una tabla no veo las columnas de la derecha.</td><td>Desliza la tabla horizontalmente con el dedo o la rueda del mouse; la columna de Acciones queda fija a la derecha.</td></tr>
+</table>
+
+<div class="tip">¿Dudas o sugerencias sobre el sistema? Consérvalas para la próxima sesión de ajustes y mejoras.</div>
+
+<p style="text-align:center; margin-top:30px; color:#6b7280; font-size:9pt;">Space Bike — Sistema de Gestión del Taller · Manual de Usuario v1.0</p>
+
+</body>
+</html>

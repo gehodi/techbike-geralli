@@ -34,13 +34,10 @@ export default function Bicicletas() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [modalDetalle, setModalDetalle] = useState<Bicicleta | null>(null)
-
-  // Estados para manejo de foto
   const [fotoActual, setFotoActual] = useState<string | null>(null)
   const [fotoFile, setFotoFile] = useState<File | null>(null)
   const [fotoPreview, setFotoPreview] = useState<string | null>(null)
   const [uploadingFoto, setUploadingFoto] = useState(false)
-
   const [formData, setFormData] = useState({
     cliente_id: '', marca: '', modelo: '', numero_serie: '', talla: '',
     color: '', tipo_bicicleta_id: '', año: '', notas: ''
@@ -58,15 +55,12 @@ export default function Bicicletas() {
         .from('bicicletas')
         .select(`*, clientes(nombres, apellidos), tipos_de_bicicletas(id, nombre)`)
         .order('marca')
-
       if (error) throw error
-
       const procesadas = data?.map((b: any) => ({
         ...b,
         cliente_nombre: b.clientes ? `${b.clientes.nombres} ${b.clientes.apellidos}` : 'Sin cliente',
         tipo_bicicleta_nombre: b.tipos_de_bicicletas?.nombre || 'Sin tipo'
       })) || []
-
       setBicicletas(procesadas)
     } catch (error: any) {
       toast.error('Error al cargar: ' + error.message)
@@ -105,20 +99,16 @@ export default function Bicicletas() {
     try {
       const fileExt = file.name.split('.').pop()
       const fileName = `${bicicletaId}/${Date.now()}.${fileExt}`
-
       const { error: uploadError } = await supabase.storage
         .from('fotos-bicicletas')
         .upload(fileName, file, {
           cacheControl: '3600',
           upsert: false
         })
-
       if (uploadError) throw uploadError
-
       const { data: { publicUrl } } = supabase.storage
         .from('fotos-bicicletas')
         .getPublicUrl(fileName)
-
       return publicUrl
     } catch (error: any) {
       toast.error('Error al subir foto: ' + error.message)
@@ -129,9 +119,7 @@ export default function Bicicletas() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     try {
-      let fotoUrl = fotoActual // Mantener la foto actual por defecto
-
-      // Si hay una nueva foto seleccionada, subirla
+      let fotoUrl = fotoActual
       if (fotoFile) {
         setUploadingFoto(true)
         const nuevaUrl = await uploadFoto(fotoFile, editingId || 'nueva')
@@ -140,7 +128,6 @@ export default function Bicicletas() {
           fotoUrl = nuevaUrl
         }
       }
-
       const data: any = {
         cliente_id: formData.cliente_id || null,
         marca: formData.marca,
@@ -153,7 +140,6 @@ export default function Bicicletas() {
         notas: formData.notas || null,
         foto_principal_url: fotoUrl
       }
-
       if (editingId) {
         const { error } = await supabase.from('bicicletas').update(data).eq('id', editingId)
         if (error) throw error
@@ -184,16 +170,12 @@ export default function Bicicletas() {
       año: b.año?.toString() || '',
       notas: b.notas || ''
     })
-    // Cargar foto actual en el formulario
     setFotoActual(b.foto_principal_url || null)
     setFotoPreview(b.foto_principal_url || null)
     setFotoFile(null)
-
     setEditingId(b.id)
     setShowForm(true)
     setModalDetalle(null)
-
-    // Scroll suave al formulario
     setTimeout(() => {
       formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }, 100)
@@ -295,21 +277,20 @@ export default function Bicicletas() {
                   <label className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 text-sm w-fit">
                     <Upload className="w-4 h-4 text-slate-600" />
                     <span>{fotoFile ? 'Cambiar foto' : 'Subir/Cambiar foto'}</span>
+                    {/* ✅ CORREGIDO: sin capture="environment" → el celular ofrece cámara O galería */}
                     <input
                       type="file"
                       accept="image/*"
-                      capture="environment"
                       onChange={handleFotoChange}
                       className="hidden"
                     />
                   </label>
-                  <p className="text-xs text-slate-500 mt-2">Máximo 5MB. En móviles abrirá la cámara.</p>
+                  <p className="text-xs text-slate-500 mt-2">Máximo 5MB. En el celular podrás elegir entre tomar foto o subir desde la galería.</p>
                 </div>
               </div>
             </div>
 
             <div><label className="block text-sm font-medium text-slate-700 mb-1">Notas</label><textarea value={formData.notas} onChange={(e) => setFormData({...formData, notas: e.target.value})} rows={2} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" /></div>
-
             <div className="flex gap-2 justify-end">
               <button type="button" onClick={resetForm} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
               <button

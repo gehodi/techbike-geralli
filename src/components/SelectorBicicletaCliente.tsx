@@ -35,8 +35,6 @@ export default function SelectorBicicletaCliente({ clienteId, value, onChange }:
   })
   const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [photoPreview, setPhotoPreview] = useState<string | null>(null)
-
-  // Estados para el dropdown personalizado
   const [isOpen, setIsOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -68,13 +66,11 @@ export default function SelectorBicicletaCliente({ clienteId, value, onChange }:
         .select('id, marca, modelo, numero_serie, tipo_bicicleta_id, foto_principal_url')
         .eq('cliente_id', clienteId)
         .order('marca')
-
       if (error) {
         console.error('Error cargando bicicletas:', error)
         toast.error('Error al cargar bicicletas: ' + error.message)
         return
       }
-
       const bicicletasConTipo = await Promise.all(
         (data || []).map(async (b: any) => {
           let tipoNombre = 'Sin tipo'
@@ -93,7 +89,6 @@ export default function SelectorBicicletaCliente({ clienteId, value, onChange }:
         })
       )
       setBicicletas(bicicletasConTipo)
-      console.log('Bicicletas cargadas:', bicicletasConTipo.length)
     } catch (error: any) {
       console.error('Error:', error)
       toast.error('Error al cargar bicicletas')
@@ -106,7 +101,6 @@ export default function SelectorBicicletaCliente({ clienteId, value, onChange }:
         .from('tipos_de_bicicletas')
         .select('id, nombre')
         .order('nombre')
-
       if (error) {
         console.error('Error cargando tipos:', error)
         return
@@ -130,33 +124,26 @@ export default function SelectorBicicletaCliente({ clienteId, value, onChange }:
       }
       setPhotoFile(file)
       setPhotoPreview(URL.createObjectURL(file))
-      console.log('Foto seleccionada:', file.name, file.size)
     }
   }
 
-  async function uploadPhoto(file: File, clienteId: string): Promise<string | null> {
+  async function uploadPhoto(file: File, clienteIdParam: string): Promise<string | null> {
     try {
       const fileExt = file.name.split('.').pop()
-      const fileName = `${clienteId}/${Date.now()}.${fileExt}`
-      console.log('Subiendo foto:', fileName)
-
+      const fileName = `${clienteIdParam}/${Date.now()}.${fileExt}`
       const { error: uploadError } = await supabase.storage
         .from('fotos-bicicletas')
         .upload(fileName, file, {
           cacheControl: '3600',
           upsert: false
         })
-
       if (uploadError) {
         console.error('Error de upload:', uploadError)
         throw uploadError
       }
-
       const { data: { publicUrl } } = supabase.storage
         .from('fotos-bicicletas')
         .getPublicUrl(fileName)
-
-      console.log('Foto subida exitosamente:', publicUrl)
       return publicUrl
     } catch (error: any) {
       console.error('Error al subir foto:', error)
@@ -171,48 +158,35 @@ export default function SelectorBicicletaCliente({ clienteId, value, onChange }:
       toast.error('Marca y Modelo son obligatorios')
       return
     }
-
     setLoading(true)
     try {
-      console.log('Buscando duplicados...')
+      // Verificación de duplicados
       let query = supabase
         .from('bicicletas')
         .select('id, marca, modelo, numero_serie, foto_principal_url')
         .eq('cliente_id', clienteId)
         .ilike('marca', newBike.marca.trim())
         .ilike('modelo', newBike.modelo.trim())
-
       if (newBike.numero_serie.trim()) {
         query = query.eq('numero_serie', newBike.numero_serie.trim())
       }
-
       const { data: existentes, error: errorCheck } = await query
       if (errorCheck) {
         console.error('Error verificando duplicados:', errorCheck)
         throw errorCheck
       }
-
-      console.log('Bicicletas existentes encontradas:', existentes?.length || 0)
-
       if (existentes && existentes.length > 0) {
         const bikeExistente = existentes[0]
-        console.log('Bicicleta existente seleccionada:', bikeExistente.id)
         onChange(bikeExistente.id)
         setShowNewForm(false)
         resetForm()
-        toast.success(
-          <div className="flex items-center gap-2">
-            <CheckCircle className="w-4 h-4 text-green-600" />
-            <span>¡Bicicleta ya registrada! Se seleccionó automáticamente.</span>
-          </div>
-        )
+        toast.success('¡Bicicleta ya registrada! Se seleccionó automáticamente.')
         setLoading(false)
         return
       }
 
       let fotoUrl: string | null = null
       if (photoFile) {
-        console.log('Iniciando subida de foto...')
         setUploadingPhoto(true)
         fotoUrl = await uploadPhoto(photoFile, clienteId)
         setUploadingPhoto(false)
@@ -222,7 +196,6 @@ export default function SelectorBicicletaCliente({ clienteId, value, onChange }:
         }
       }
 
-      console.log('Insertando nueva bicicleta...')
       const { data: nuevaBike, error: errorInsert } = await supabase
         .from('bicicletas')
         .insert([{
@@ -235,13 +208,10 @@ export default function SelectorBicicletaCliente({ clienteId, value, onChange }:
         }])
         .select()
         .single()
-
       if (errorInsert) {
         console.error('Error insertando bicicleta:', errorInsert)
         throw errorInsert
       }
-
-      console.log('Bicicleta creada:', nuevaBike.id)
       toast.success('Bicicleta registrada y seleccionada')
       onChange(nuevaBike.id)
       setShowNewForm(false)
@@ -312,7 +282,7 @@ export default function SelectorBicicletaCliente({ clienteId, value, onChange }:
                   {bicicletaSeleccionada.marca} {bicicletaSeleccionada.modelo}
                 </div>
                 <div className="text-xs text-slate-500">
-                  {bicicletaSeleccionada.numero_serie ? `Serie: ${bicicletaSeleccionada.numero_serie} • ` : ''}
+                  {bicicletaSeleccionada.numero_serie ? `Serie: ${bicicletaSeleccionada.numero_serie} •` : ''}
                   {bicicletaSeleccionada.tipo_nombre}
                 </div>
               </div>
@@ -350,7 +320,6 @@ export default function SelectorBicicletaCliente({ clienteId, value, onChange }:
                 </div>
               </div>
             )}
-
             {/* Lista de bicicletas */}
             <div className="overflow-y-auto max-h-48">
               {bicicletasFiltradas.length === 0 ? (
@@ -400,7 +369,6 @@ export default function SelectorBicicletaCliente({ clienteId, value, onChange }:
             </div>
           </div>
         )}
-
         {/* Input oculto para validación de formulario */}
         <input type="hidden" value={value} required />
       </div>
@@ -489,10 +457,10 @@ export default function SelectorBicicletaCliente({ clienteId, value, onChange }:
               <label className="flex items-center gap-2 px-3 py-2 bg-white border border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 text-sm">
                 <Camera className="w-4 h-4 text-slate-600" />
                 <span>{photoFile ? 'Cambiar foto' : 'Tomar/Subir foto'}</span>
+                {/* ✅ CORREGIDO: sin capture="environment" → el celular ofrece cámara O galería */}
                 <input
                   type="file"
                   accept="image/*"
-                  capture="environment"
                   onChange={handlePhotoChange}
                   className="hidden"
                 />
@@ -510,7 +478,7 @@ export default function SelectorBicicletaCliente({ clienteId, value, onChange }:
                 </div>
               )}
             </div>
-            <p className="text-xs text-slate-500 mt-1">Máximo 5MB. En móviles abrirá la cámara automáticamente.</p>
+            <p className="text-xs text-slate-500 mt-1">Máximo 5MB. En el celular podrás elegir entre tomar foto o subir desde la galería.</p>
           </div>
 
           <button

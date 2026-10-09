@@ -48,7 +48,7 @@ export default function BicicletasUsadas() {
   const [fotoPreview, setFotoPreview] = useState<string | null>(null)
   const [uploadingFoto, setUploadingFoto] = useState(false)
   const [formData, setFormData] = useState({
-    proveedor_id: '', // ✅ AGREGADO
+    proveedor_id: '',
     intermediario_id: '',
     comision_intermediario: '',
     tipo_bicicleta_id: '',
@@ -88,7 +88,6 @@ export default function BicicletasUsadas() {
       const { count, error: countError } = await countQuery
       if (countError) throw countError
       setTotalRegistros(count || 0)
-
       const from = (paginaActual - 1) * registrosPorPagina
       const to = from + registrosPorPagina - 1
       let query = supabase
@@ -256,7 +255,7 @@ export default function BicicletasUsadas() {
 
   function handleEdit(b: BicicletaAdquirida) {
     setFormData({
-      proveedor_id: b.proveedor_id?.toString() || '', // ✅ AGREGADO
+      proveedor_id: b.proveedor_id?.toString() || '',
       intermediario_id: b.intermediario_id?.toString() || '',
       comision_intermediario: b.comision_intermediario?.toString() || '',
       tipo_bicicleta_id: b.tipo_bicicleta_id?.toString() || '',
@@ -301,7 +300,7 @@ export default function BicicletasUsadas() {
 
   function resetForm() {
     setFormData({
-      proveedor_id: '', // ✅ AGREGADO
+      proveedor_id: '',
       intermediario_id: '',
       comision_intermediario: '',
       tipo_bicicleta_id: '',
@@ -377,19 +376,19 @@ export default function BicicletasUsadas() {
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
               <label className="block text-sm font-medium text-slate-700 mb-1">Código de Inventario</label>
               {editingId ? (
-                <input 
-                  type="text" 
-                  value={bicicletas.find(b => b.id === editingId)?.codigo_inventario || ''} 
-                  disabled 
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-slate-100 text-slate-600 font-mono" 
+                <input
+                  type="text"
+                  value={bicicletas.find(b => b.id === editingId)?.codigo_inventario || ''}
+                  disabled
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-slate-100 text-slate-600 font-mono"
                 />
               ) : (
                 <div className="flex items-center gap-3">
-                  <input 
-                    type="text" 
-                    placeholder="Se generará automáticamente al guardar (Ej: BU-2026-0001)" 
-                    disabled 
-                    className="flex-1 px-3 py-2 border border-slate-300 rounded-lg bg-slate-50 text-slate-400 italic" 
+                  <input
+                    type="text"
+                    placeholder="Se generará automáticamente al guardar (Ej: BU-2026-0001)"
+                    disabled
+                    className="flex-1 px-3 py-2 border border-slate-300 rounded-lg bg-slate-50 text-slate-400 italic"
                   />
                   <span className="text-xs text-blue-600 font-medium whitespace-nowrap">Formato: BU-AÑO-CORRELATIVO</span>
                 </div>
@@ -399,10 +398,10 @@ export default function BicicletasUsadas() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Proveedor (Vendedor) *</label>
-                <select 
-                  value={formData.proveedor_id} 
-                  onChange={(e) => setFormData({...formData, proveedor_id: e.target.value})} 
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
+                <select
+                  value={formData.proveedor_id}
+                  onChange={(e) => setFormData({...formData, proveedor_id: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                   required
                 >
                   <option value="">Seleccionar...</option>
@@ -413,9 +412,9 @@ export default function BicicletasUsadas() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Intermediario (Opcional)</label>
-                <select 
-                  value={formData.intermediario_id} 
-                  onChange={(e) => setFormData({...formData, intermediario_id: e.target.value})} 
+                <select
+                  value={formData.intermediario_id}
+                  onChange={(e) => setFormData({...formData, intermediario_id: e.target.value})}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                 >
                   <option value="">Sin intermediario</option>
@@ -427,23 +426,23 @@ export default function BicicletasUsadas() {
               {formData.intermediario_id && (
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Comisión Intermediario</label>
-                  <input 
-                    type="number" 
-                    step="0.01" 
+                  <input
+                    type="number"
+                    step="0.01"
                     min="0"
-                    value={formData.comision_intermediario} 
-                    onChange={(e) => setFormData({...formData, comision_intermediario: e.target.value})} 
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
+                    value={formData.comision_intermediario}
+                    onChange={(e) => setFormData({...formData, comision_intermediario: e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                     placeholder="0.00"
                   />
                 </div>
               )}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Tipo de Bicicleta *</label>
-                <select 
-                  value={formData.tipo_bicicleta_id} 
-                  onChange={(e) => setFormData({...formData, tipo_bicicleta_id: e.target.value})} 
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
+                <select
+                  value={formData.tipo_bicicleta_id}
+                  onChange={(e) => setFormData({...formData, tipo_bicicleta_id: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                   required
                 >
                   <option value="">Seleccionar...</option>
@@ -454,88 +453,88 @@ export default function BicicletasUsadas() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Marca</label>
-                <input 
-                  type="text" 
-                  value={formData.marca} 
-                  onChange={(e) => setFormData({...formData, marca: e.target.value})} 
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
+                <input
+                  type="text"
+                  value={formData.marca}
+                  onChange={(e) => setFormData({...formData, marca: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                   placeholder="Ej: Specialized"
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Modelo</label>
-                <input 
-                  type="text" 
-                  value={formData.modelo} 
-                  onChange={(e) => setFormData({...formData, modelo: e.target.value})} 
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
+                <input
+                  type="text"
+                  value={formData.modelo}
+                  onChange={(e) => setFormData({...formData, modelo: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                   placeholder="Ej: Rockhopper"
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Color</label>
-                <input 
-                  type="text" 
-                  value={formData.color} 
-                  onChange={(e) => setFormData({...formData, color: e.target.value})} 
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
+                <input
+                  type="text"
+                  value={formData.color}
+                  onChange={(e) => setFormData({...formData, color: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                   placeholder="Ej: Rojo"
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Número de Serie</label>
-                <input 
-                  type="text" 
-                  value={formData.numero_serie} 
-                  onChange={(e) => setFormData({...formData, numero_serie: e.target.value})} 
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
+                <input
+                  type="text"
+                  value={formData.numero_serie}
+                  onChange={(e) => setFormData({...formData, numero_serie: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                   placeholder="Opcional"
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Año Fabricación</label>
-                <input 
-                  type="number" 
-                  min="1900" 
+                <input
+                  type="number"
+                  min="1900"
                   max={new Date().getFullYear()}
-                  value={formData.ano_fabricacion} 
-                  onChange={(e) => setFormData({...formData, ano_fabricacion: e.target.value})} 
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
+                  value={formData.ano_fabricacion}
+                  onChange={(e) => setFormData({...formData, ano_fabricacion: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                   placeholder="2020"
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Fecha Adquisición *</label>
-                <input 
-                  type="date" 
-                  value={formData.fecha_adquisicion} 
-                  onChange={(e) => setFormData({...formData, fecha_adquisicion: e.target.value})} 
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
-                  required 
+                <input
+                  type="date"
+                  value={formData.fecha_adquisicion}
+                  onChange={(e) => setFormData({...formData, fecha_adquisicion: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                  required
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Costo de Compra *</label>
-                <input 
-                  type="number" 
-                  step="0.01" 
+                <input
+                  type="number"
+                  step="0.01"
                   min="0"
-                  value={formData.costo_compra} 
-                  onChange={(e) => setFormData({...formData, costo_compra: e.target.value})} 
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
-                  required 
+                  value={formData.costo_compra}
+                  onChange={(e) => setFormData({...formData, costo_compra: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                  required
                   placeholder="0.00"
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Precio Venta Sugerido</label>
-                <input 
-                  type="number" 
-                  step="0.01" 
+                <input
+                  type="number"
+                  step="0.01"
                   min="0"
-                  value={formData.precio_venta_sugerido} 
-                  onChange={(e) => setFormData({...formData, precio_venta_sugerido: e.target.value})} 
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
+                  value={formData.precio_venta_sugerido}
+                  onChange={(e) => setFormData({...formData, precio_venta_sugerido: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                   placeholder="0.00"
                 />
               </div>
@@ -544,21 +543,21 @@ export default function BicicletasUsadas() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Detalles a Reparar / Requerimientos</label>
-                <textarea 
-                  value={formData.detalles_requeridos} 
-                  onChange={(e) => setFormData({...formData, detalles_requeridos: e.target.value})} 
-                  rows={3} 
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
+                <textarea
+                  value={formData.detalles_requeridos}
+                  onChange={(e) => setFormData({...formData, detalles_requeridos: e.target.value})}
+                  rows={3}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                   placeholder="Ej: Cambio de frenos, ajuste de cambios..."
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Observaciones</label>
-                <textarea 
-                  value={formData.observaciones} 
-                  onChange={(e) => setFormData({...formData, observaciones: e.target.value})} 
-                  rows={3} 
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
+                <textarea
+                  value={formData.observaciones}
+                  onChange={(e) => setFormData({...formData, observaciones: e.target.value})}
+                  rows={3}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                   placeholder="Notas adicionales..."
                 />
               </div>
@@ -569,14 +568,14 @@ export default function BicicletasUsadas() {
               <div className="flex items-center gap-4">
                 {fotoPreview ? (
                   <div className="relative">
-                    <img 
-                      src={fotoPreview} 
-                      alt="Foto bicicleta" 
-                      className="h-32 w-32 object-cover rounded-lg border-2 border-slate-200" 
+                    <img
+                      src={fotoPreview}
+                      alt="Foto bicicleta"
+                      className="h-32 w-32 object-cover rounded-lg border-2 border-slate-200"
                     />
-                    <button 
-                      type="button" 
-                      onClick={() => { setFotoFile(null); setFotoPreview(null); }} 
+                    <button
+                      type="button"
+                      onClick={() => { setFotoFile(null); setFotoPreview(null); }}
                       className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 transition-colors"
                     >
                       <X className="w-4 h-4" />
@@ -591,30 +590,30 @@ export default function BicicletasUsadas() {
                   <label className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 text-sm w-fit transition-colors">
                     <Upload className="w-4 h-4 text-slate-600" />
                     <span>{fotoFile ? 'Cambiar foto' : 'Subir foto'}</span>
-                    <input 
-                      type="file" 
-                      accept="image/*" 
-                      capture="environment" 
-                      onChange={handleFotoChange} 
-                      className="hidden" 
+                    {/* ✅ CORREGIDO: sin capture="environment" → el celular ofrece cámara O galería */}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleFotoChange}
+                      className="hidden"
                     />
                   </label>
-                  <p className="text-xs text-slate-500 mt-2">Máximo 5MB. Formatos: JPG, PNG, GIF.</p>
+                  <p className="text-xs text-slate-500 mt-2">Máximo 5MB. En el celular podrás elegir entre tomar foto o subir desde la galería. Formatos: JPG, PNG, GIF.</p>
                 </div>
               </div>
             </div>
 
             <div className="flex gap-2 justify-end pt-4 border-t border-slate-200">
-              <button 
-                type="button" 
-                onClick={resetForm} 
+              <button
+                type="button"
+                onClick={resetForm}
                 className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
               >
                 Cancelar
               </button>
-              <button 
-                type="submit" 
-                disabled={uploadingFoto} 
+              <button
+                type="submit"
+                disabled={uploadingFoto}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 {uploadingFoto ? (
@@ -636,15 +635,15 @@ export default function BicicletasUsadas() {
 
       <div className="relative">
         <Search className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
-        <input 
-          type="text" 
-          placeholder="Buscar por código, marca o modelo..." 
-          value={searchTerm} 
-          onChange={(e) => { 
+        <input
+          type="text"
+          placeholder="Buscar por código, marca o modelo..."
+          value={searchTerm}
+          onChange={(e) => {
             setSearchTerm(e.target.value)
             setPaginaActual(1)
-          }} 
-          className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
+          }}
+          className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
         />
       </div>
 
@@ -682,11 +681,11 @@ export default function BicicletasUsadas() {
                         <td className="px-6 py-4 text-sm font-mono text-slate-900 font-medium">{b.codigo_inventario}</td>
                         <td className="px-6 py-4">
                           {b.foto_url ? (
-                            <img 
-                              src={b.foto_url} 
-                              alt={`Foto ${b.codigo_inventario}`} 
-                              className="h-12 w-12 object-cover rounded-lg border border-slate-200 cursor-pointer hover:scale-110 transition-transform" 
-                              onClick={() => window.open(b.foto_url, '_blank')} 
+                            <img
+                              src={b.foto_url}
+                              alt={`Foto ${b.codigo_inventario}`}
+                              className="h-12 w-12 object-cover rounded-lg border border-slate-200 cursor-pointer hover:scale-110 transition-transform"
+                              onClick={() => window.open(b.foto_url, '_blank')}
                             />
                           ) : (
                             <div className="h-12 w-12 bg-slate-100 rounded-lg border border-slate-200 flex items-center justify-center">
@@ -709,25 +708,25 @@ export default function BicicletasUsadas() {
                         </td>
                         <td className="sticky right-0 bg-white border-l-2 border-slate-200 px-6 py-4 text-right z-10 shadow-[-4px_0_6px_-1px_rgba(0,0,0,0.05)]">
                           <div className="flex justify-end gap-2">
-                            <button 
-                              onClick={() => setModalDetalle(b)} 
-                              className="p-2 text-slate-600 hover:bg-slate-100 rounded transition-colors" 
+                            <button
+                              onClick={() => setModalDetalle(b)}
+                              className="p-2 text-slate-600 hover:bg-slate-100 rounded transition-colors"
                               title="Ver detalle"
                             >
                               <Eye className="w-4 h-4" />
                             </button>
                             {b.estado === 'adquirida' && (
                               <>
-                                <button 
-                                  onClick={() => handleEdit(b)} 
-                                  className="p-2 text-blue-600 hover:bg-blue-50 rounded transition-colors" 
+                                <button
+                                  onClick={() => handleEdit(b)}
+                                  className="p-2 text-blue-600 hover:bg-blue-50 rounded transition-colors"
                                   title="Editar"
                                 >
                                   <Edit className="w-4 h-4" />
                                 </button>
-                                <button 
-                                  onClick={() => handleDelete(b.id)} 
-                                  className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors" 
+                                <button
+                                  onClick={() => handleDelete(b.id)}
+                                  className="p-2 text-red-600 hover:bg-red-50 rounded transition-colors"
                                   title="Eliminar"
                                 >
                                   <Trash2 className="w-4 h-4" />
@@ -742,15 +741,15 @@ export default function BicicletasUsadas() {
                 </table>
               </div>
             </div>
-            <ControlesPaginacion 
-              paginaActual={paginaActual} 
-              totalRegistros={totalRegistros} 
-              registrosPorPagina={registrosPorPagina} 
-              onPageChange={setPaginaActual} 
-              onRegistrosPorPaginaChange={(cantidad) => { 
+            <ControlesPaginacion
+              paginaActual={paginaActual}
+              totalRegistros={totalRegistros}
+              registrosPorPagina={registrosPorPagina}
+              onPageChange={setPaginaActual}
+              onRegistrosPorPaginaChange={(cantidad) => {
                 setRegistrosPorPagina(cantidad)
                 setPaginaActual(1)
-              }} 
+              }}
             />
           </>
         )}
