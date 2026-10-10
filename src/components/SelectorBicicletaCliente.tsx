@@ -24,6 +24,10 @@ interface SelectorBicicletaClienteProps {
   onChange: (bicicletaId: string) => void
 }
 
+// ✅ Formatos que todos los navegadores pueden mostrar
+const TIPOS_VALIDOS = ['image/jpeg', 'image/png', 'image/webp']
+const EXT_POR_TIPO: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }
+
 export default function SelectorBicicletaCliente({ clienteId, value, onChange }: SelectorBicicletaClienteProps) {
   const [bicicletas, setBicicletas] = useState<Bicicleta[]>([])
   const [tiposBicicleta, setTiposBicicleta] = useState<TipoBicicleta[]>([])
@@ -111,32 +115,36 @@ export default function SelectorBicicletaCliente({ clienteId, value, onChange }:
     }
   }
 
+  // ✅ Validación estricta compartida por ambos botones (cámara y galería)
   function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
-    if (file) {
-      if (!file.type.startsWith('image/')) {
-        toast.error('Solo se permiten imágenes')
-        return
-      }
-      if (file.size > 5 * 1024 * 1024) {
-        toast.error('La imagen no debe superar los 5MB')
-        return
-      }
-      setPhotoFile(file)
-      setPhotoPreview(URL.createObjectURL(file))
+    if (!file) return
+    if (file.type === 'image/heic' || file.type === 'image/heif') {
+      toast.error('Esa foto está en formato HEIC y el navegador no puede mostrarla. Elige una JPG/PNG o sube una captura de pantalla.')
+      e.target.value = ''
+      return
     }
+    if (!TIPOS_VALIDOS.includes(file.type)) {
+      toast.error('Formato no soportado. Usa imágenes JPG, PNG o WEBP.')
+      e.target.value = ''
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error(`La imagen pesa ${(file.size / 1024 / 1024).toFixed(1)}MB y el máximo es 5MB.`)
+      e.target.value = ''
+      return
+    }
+    setPhotoFile(file)
+    setPhotoPreview(URL.createObjectURL(file))
   }
 
   async function uploadPhoto(file: File, clienteIdParam: string): Promise<string | null> {
     try {
-      const fileExt = file.name.split('.').pop()
-      const fileName = `${clienteIdParam}/${Date.now()}.${fileExt}`
+      const ext = EXT_POR_TIPO[file.type] || 'jpg'
+      const fileName = `${clienteIdParam}/${Date.now()}.${ext}`
       const { error: uploadError } = await supabase.storage
         .from('fotos-bicicletas')
-        .upload(fileName, file, {
-          cacheControl: '3600',
-          upsert: false
-        })
+        .upload(fileName, file, { cacheControl: '3600', upsert: false, contentType: file.type })
       if (uploadError) {
         console.error('Error de upload:', uploadError)
         throw uploadError
@@ -450,24 +458,34 @@ export default function SelectorBicicletaCliente({ clienteId, value, onChange }:
             </div>
           </div>
 
-          {/* Captura de Foto */}
+          {/* ✅ FOTO CON DOBLE OPCIÓN: CÁMARA O GALERÍA */}
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">Foto de la Bicicleta</label>
-            <div className="flex items-center gap-3">
-              <label className="flex items-center gap-2 px-3 py-2 bg-white border border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 text-sm">
-                <Camera className="w-4 h-4 text-slate-600" />
-                <span>{photoFile ? 'Cambiar foto' : 'Tomar/Subir foto'}</span>
-                {/* SIN capture: el celular ofrece cámara O galería */}
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handlePhotoChange}
-                  className="hidden"
-                />
-              </label>
+            <div className="flex items-start gap-3 flex-wrap">
+              <div className="flex flex-wrap gap-2">
+                <label className="flex items-center gap-2 px-3 py-2 bg-white border border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 text-sm">
+                  <Camera className="w-4 h-4 text-slate-600" />
+                  <span>Tomar foto</span>
+                  <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={handlePhotoChange} className="hidden" />
+                </label>
+                <label className="flex items-center gap-2 px-3 py-2 bg-white border border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 text-sm">
+                  <Upload className="w-4 h-4 text-slate-600" />
+                  <span>Subir de galería</span>
+                  <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handlePhotoChange} className="hidden" />
+                </label>
+              </div>
               {photoPreview && (
                 <div className="relative">
-                  <img src={photoPreview} alt="Preview" className="h-12 w-12 object-cover rounded-lg border border-slate-200" />
+                  <img
+                    src={photoPreview}
+                    alt="Preview"
+                    className="h-12 w-12 object-cover rounded-lg border border-slate-200"
+                    onError={() => {
+                      toast.error('El navegador no puede mostrar este archivo. Elige una imagen JPG o PNG.')
+                      setPhotoFile(null)
+                      setPhotoPreview(null)
+                    }}
+                  />
                   <button
                     type="button"
                     onClick={() => { setPhotoFile(null); setPhotoPreview(null); }}
@@ -478,7 +496,7 @@ export default function SelectorBicicletaCliente({ clienteId, value, onChange }:
                 </div>
               )}
             </div>
-            <p className="text-xs text-slate-500 mt-1">Máximo 5MB. En el celular podrás elegir entre tomar foto o subir desde la galería.</p>
+            <p className="text-xs text-slate-500 mt-1">Máximo 5MB. Formatos: JPG, PNG, WEBP. Usa "Tomar foto" para la cámara o "Subir de galería" para elegir una imagen existente.</p>
           </div>
 
           <button

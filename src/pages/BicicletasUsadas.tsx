@@ -31,6 +31,10 @@ interface BicicletaAdquirida {
 interface ProveedorBU { id: number; nombre_razon_social: string }
 interface TipoBici { id: number; nombre: string }
 
+// ✅ Formatos que todos los navegadores pueden mostrar
+const TIPOS_VALIDOS = ['image/jpeg', 'image/png', 'image/webp']
+const EXT_POR_TIPO: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }
+
 export default function BicicletasUsadas() {
   const formRef = useRef<HTMLDivElement>(null)
   const [bicicletas, setBicicletas] = useState<BicicletaAdquirida[]>([])
@@ -81,9 +85,7 @@ export default function BicicletasUsadas() {
         .select('*', { count: 'exact', head: true })
       if (searchTerm) {
         const term = `%${searchTerm}%`
-        countQuery = countQuery.or(
-          `codigo_inventario.ilike.${term},marca.ilike.${term},modelo.ilike.${term}`
-        )
+        countQuery = countQuery.or(`codigo_inventario.ilike.${term},marca.ilike.${term},modelo.ilike.${term}`)
       }
       const { count, error: countError } = await countQuery
       if (countError) throw countError
@@ -101,9 +103,7 @@ export default function BicicletasUsadas() {
         .range(from, to)
       if (searchTerm) {
         const term = `%${searchTerm}%`
-        query = query.or(
-          `codigo_inventario.ilike.${term},marca.ilike.${term},modelo.ilike.${term}`
-        )
+        query = query.or(`codigo_inventario.ilike.${term},marca.ilike.${term},modelo.ilike.${term}`)
       }
       const { data, error } = await query
       if (error) throw error
@@ -152,29 +152,36 @@ export default function BicicletasUsadas() {
     }
   }
 
+  // ✅ Validación estricta compartida por ambos botones (cámara y galería)
   function handleFotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
-    if (file) {
-      if (!file.type.startsWith('image/')) {
-        toast.error('Solo se permiten imágenes')
-        return
-      }
-      if (file.size > 5 * 1024 * 1024) {
-        toast.error('La imagen no debe superar los 5MB')
-        return
-      }
-      setFotoFile(file)
-      setFotoPreview(URL.createObjectURL(file))
+    if (!file) return
+    if (file.type === 'image/heic' || file.type === 'image/heif') {
+      toast.error('Esa foto está en formato HEIC y el navegador no puede mostrarla. Elige una JPG/PNG o sube una captura de pantalla.')
+      e.target.value = ''
+      return
     }
+    if (!TIPOS_VALIDOS.includes(file.type)) {
+      toast.error('Formato no soportado. Usa imágenes JPG, PNG o WEBP.')
+      e.target.value = ''
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error(`La imagen pesa ${(file.size / 1024 / 1024).toFixed(1)}MB y el máximo es 5MB.`)
+      e.target.value = ''
+      return
+    }
+    setFotoFile(file)
+    setFotoPreview(URL.createObjectURL(file))
   }
 
   async function uploadFoto(file: File, bicicletaId: number | string): Promise<string | null> {
     try {
-      const fileExt = file.name.split('.').pop()
-      const fileName = `bicicletas_adquiridas/${bicicletaId}/${Date.now()}.${fileExt}`
+      const ext = EXT_POR_TIPO[file.type] || 'jpg'
+      const fileName = `bicicletas_adquiridas/${bicicletaId}/${Date.now()}.${ext}`
       const { error: uploadError } = await supabase.storage
         .from('fotos-bicicletas')
-        .upload(fileName, file, { cacheControl: '3600', upsert: false })
+        .upload(fileName, file, { cacheControl: '3600', upsert: false, contentType: file.type })
       if (uploadError) throw uploadError
       const { data: { publicUrl } } = supabase.storage
         .from('fotos-bicicletas')
@@ -229,17 +236,12 @@ export default function BicicletasUsadas() {
         data.foto_url = fotoUrl
       }
       if (editingId) {
-        const { error } = await supabase
-          .from('bicicletas_adquiridas')
-          .update(data)
-          .eq('id', editingId)
+        const { error } = await supabase.from('bicicletas_adquiridas').update(data).eq('id', editingId)
         if (error) throw error
         toast.success('Bicicleta actualizada correctamente')
       } else {
         data.estado = 'adquirida'
-        const { error } = await supabase
-          .from('bicicletas_adquiridas')
-          .insert([data])
+        const { error } = await supabase.from('bicicletas_adquiridas').insert([data])
         if (error) throw error
         toast.success('Bicicleta registrada en inventario')
       }
@@ -285,10 +287,7 @@ export default function BicicletasUsadas() {
       return
     }
     try {
-      const { error } = await supabase
-        .from('bicicletas_adquiridas')
-        .delete()
-        .eq('id', id)
+      const { error } = await supabase.from('bicicletas_adquiridas').delete().eq('id', id)
       if (error) throw error
       toast.success('Registro eliminado correctamente')
       fetchBicicletas()
@@ -563,15 +562,21 @@ export default function BicicletasUsadas() {
               </div>
             </div>
 
+            {/* ✅ FOTO CON DOBLE OPCIÓN: CÁMARA O GALERÍA */}
             <div className="border-t border-slate-200 pt-4">
               <label className="block text-sm font-medium text-slate-700 mb-2">Foto del Estado Inicial</label>
-              <div className="flex items-center gap-4">
+              <div className="flex items-start gap-4 flex-wrap">
                 {fotoPreview ? (
                   <div className="relative">
                     <img
                       src={fotoPreview}
                       alt="Foto bicicleta"
                       className="h-32 w-32 object-cover rounded-lg border-2 border-slate-200"
+                      onError={() => {
+                        toast.error('El navegador no puede mostrar este archivo. Elige una imagen JPG o PNG.')
+                        setFotoFile(null)
+                        setFotoPreview(null)
+                      }}
                     />
                     <button
                       type="button"
@@ -586,19 +591,20 @@ export default function BicicletasUsadas() {
                     <Camera className="w-8 h-8 text-slate-400" />
                   </div>
                 )}
-                <div className="flex-1">
-                  <label className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 text-sm w-fit transition-colors">
-                    <Upload className="w-4 h-4 text-slate-600" />
-                    <span>{fotoFile ? 'Cambiar foto' : 'Subir foto'}</span>
-                    {/* ✅ CORREGIDO: sin capture="environment" → el celular ofrece cámara O galería */}
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleFotoChange}
-                      className="hidden"
-                    />
-                  </label>
-                  <p className="text-xs text-slate-500 mt-2">Máximo 5MB. En el celular podrás elegir entre tomar foto o subir desde la galería. Formatos: JPG, PNG, GIF.</p>
+                <div className="flex-1 min-w-[200px]">
+                  <div className="flex flex-wrap gap-2">
+                    <label className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 text-sm">
+                      <Camera className="w-4 h-4 text-slate-600" />
+                      <span>Tomar foto</span>
+                      <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={handleFotoChange} className="hidden" />
+                    </label>
+                    <label className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 text-sm">
+                      <Upload className="w-4 h-4 text-slate-600" />
+                      <span>Subir de galería</span>
+                      <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleFotoChange} className="hidden" />
+                    </label>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-2">Máximo 5MB. Formatos: JPG, PNG, WEBP. Usa "Tomar foto" para la cámara o "Subir de galería" para elegir una imagen existente.</p>
                 </div>
               </div>
             </div>

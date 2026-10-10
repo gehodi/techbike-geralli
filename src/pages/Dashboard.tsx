@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { Users, ClipboardList, Package, DollarSign, TrendingUp, AlertTriangle, Clock, Shield, Bike, Wrench } from 'lucide-react'
 import AlertasStock from '../components/AlertasStock'
+import { hoyLocal, fechaLocalEnDias, inicioMesLocal, inicioMesSiguienteLocal } from '../utils/fechas'
 
 interface Stats {
   totalClientes: number
@@ -54,18 +55,15 @@ export default function Dashboard() {
 
   async function fetchStats() {
     try {
-      // Total clientes
       const { count: totalClientes } = await supabase
         .from('clientes')
         .select('*', { count: 'exact', head: true })
 
-      // Órdenes pendientes
       const { count: ordenesPendientes } = await supabase
         .from('ordenes_servicio')
         .select('*', { count: 'exact', head: true })
         .in('estado', ['Pendiente', 'En Proceso'])
 
-      // Stock bajo
       const { data: inventario } = await supabase
         .from('inventario')
         .select('stock_actual, stock_reservado, stock_minimo')
@@ -74,37 +72,30 @@ export default function Dashboard() {
         (i.stock_actual - (i.stock_reservado || 0)) <= i.stock_minimo
       ).length
 
-      // ✅ CORRECCIÓN: Ingresos del mes = SOLO órdenes de CLIENTE completadas.
-      // Se excluyen 'interna_bicicleta_usada' y 'garantia' porque son a costo
-      // (no generan ingreso; su costo se recupera en la venta de la bicicleta).
-      // Se incluyen tipo_orden 'cliente' y NULL (órdenes antiguas de cliente).
-      const ahora = new Date()
-      const primerDiaMes = new Date(ahora.getFullYear(), ahora.getMonth(), 1).toISOString()
+      // ✅ INGRESOS DEL MES ÍNTEGROS EN CUALQUIER ZONA HORARIA:
+      // rango de calendario local [día 1 del mes, día 1 del mes siguiente)
+      // y solo órdenes de CLIENTE (internas/garantías son costo, no ingreso)
       const { data: ordenesMes } = await supabase
         .from('ordenes_servicio')
         .select('costo_real')
         .eq('estado', 'Completada')
         .or('tipo_orden.eq.cliente,tipo_orden.is.null')
-        .gte('fecha_entrega_real', primerDiaMes)
+        .gte('fecha_entrega_real', inicioMesLocal())
+        .lt('fecha_entrega_real', inicioMesSiguienteLocal())
       const ingresosMes = (ordenesMes || []).reduce((sum: number, o: any) => sum + (o.costo_real || 0), 0)
 
-      // Solicitudes de inventario pendientes
       const { count: solicitudesPendientes } = await supabase
         .from('requisiciones_inventario')
         .select('*', { count: 'exact', head: true })
         .eq('estado_aprobacion', 'Pendiente')
 
-      // Garantías por vencer en 15 días
-      const hoy = new Date().toISOString().split('T')[0]
-      const fechaLimite = new Date()
-      fechaLimite.setDate(fechaLimite.getDate() + 15)
-      const fechaLimiteStr = fechaLimite.toISOString().split('T')[0]
+      // ✅ Garantías por vencer con calendario local (sin desfase UTC)
       const { count: garantiasPorVencer } = await supabase
         .from('garantias')
         .select('*', { count: 'exact', head: true })
         .eq('estado', 'vigente')
-        .gte('fecha_fin', hoy)
-        .lte('fecha_fin', fechaLimiteStr)
+        .gte('fecha_fin', hoyLocal())
+        .lte('fecha_fin', fechaLocalEnDias(15))
 
       setStats({
         totalClientes: totalClientes || 0,
@@ -141,11 +132,6 @@ export default function Dashboard() {
 
   async function fetchGarantiasPorVencer() {
     try {
-      const hoy = new Date().toISOString().split('T')[0]
-      const fechaLimite = new Date()
-      fechaLimite.setDate(fechaLimite.getDate() + 15)
-      const fechaLimiteStr = fechaLimite.toISOString().split('T')[0]
-
       const { data, error } = await supabase
         .from('garantias')
         .select(`
@@ -156,12 +142,11 @@ export default function Dashboard() {
           bicicletas_adquiridas(codigo_inventario, marca, modelo)
         `)
         .eq('estado', 'vigente')
-        .gte('fecha_fin', hoy)
-        .lte('fecha_fin', fechaLimiteStr)
+        .gte('fecha_fin', hoyLocal())
+        .lte('fecha_fin', fechaLocalEnDias(15))
         .order('fecha_fin', { ascending: true })
         .limit(5)
       if (error) throw error
-
       const hoyDate = new Date()
       hoyDate.setHours(0, 0, 0, 0)
       const procesadas: GarantiaPorVencer[] = (data || []).map((g: any) => {
@@ -206,7 +191,6 @@ export default function Dashboard() {
         <p className="text-slate-500 mt-1">Resumen general del taller</p>
       </div>
 
-      {/* Tarjetas de resumen */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow cursor-pointer" onClick={() => navigate('/clientes')}>
           <div className="flex items-center justify-between mb-4">
@@ -255,11 +239,10 @@ export default function Dashboard() {
           </div>
           <div className="text-sm text-slate-600">Ingresos del Mes</div>
           <div className="text-3xl font-bold text-green-600 mt-1">{formatCurrency(stats.ingresosMes)}</div>
-          <div className="text-xs text-slate-500 mt-1">servicios a clientes completados</div>
+          <div className="text-xs text-slate-500 mt-1">servicios de clientes completados este mes</div>
         </div>
       </div>
 
-      {/* Tarjeta: Garantías por Vencer */}
       {stats.garantiasPorVencer > 0 && (
         <div 
           className="bg-amber-50 border-2 border-amber-300 rounded-xl shadow-sm p-6 cursor-pointer hover:shadow-md transition-shadow"
@@ -304,7 +287,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Panel de alertas y actividad */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
           <AlertasStock />
@@ -344,7 +326,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Accesos rápidos */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
         <h3 className="font-semibold text-slate-800 mb-4">Accesos Rápidos</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">

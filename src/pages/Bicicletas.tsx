@@ -24,7 +24,7 @@ interface Bicicleta {
 interface Cliente { id: string; nombres: string; apellidos: string }
 interface TipoBicicleta { id: number; nombre: string }
 
-// ✅ Solo formatos que TODOS los navegadores pueden mostrar
+// ✅ Formatos que todos los navegadores pueden mostrar
 const TIPOS_VALIDOS = ['image/jpeg', 'image/png', 'image/webp']
 const EXT_POR_TIPO: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }
 
@@ -83,12 +83,12 @@ export default function Bicicletas() {
     setTiposBicicleta(data || [])
   }
 
-  // ✅ VALIDACIÓN ESTRICTA: bloquea HEIC/HEIF y formatos no mostrables
+  // ✅ Validación estricta compartida por ambos botones (cámara y galería)
   function handleFotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
     if (file.type === 'image/heic' || file.type === 'image/heif') {
-      toast.error('Esa foto está en formato HEIC y el navegador no puede mostrarla. Elige una JPG/PNG, o toma una captura de pantalla de la foto y sube la captura.')
+      toast.error('Esa foto está en formato HEIC y el navegador no puede mostrarla. Elige una JPG/PNG o sube una captura de pantalla.')
       e.target.value = ''
       return
     }
@@ -106,18 +106,13 @@ export default function Bicicletas() {
     setFotoPreview(URL.createObjectURL(file))
   }
 
-  // ✅ Subida con contentType y extensión derivados del MIME (nunca .heic)
   async function uploadFoto(file: File, bicicletaId: string): Promise<string | null> {
     try {
       const ext = EXT_POR_TIPO[file.type] || 'jpg'
       const fileName = `${bicicletaId}/${Date.now()}.${ext}`
       const { error: uploadError } = await supabase.storage
         .from('fotos-bicicletas')
-        .upload(fileName, file, {
-          cacheControl: '3600',
-          upsert: false,
-          contentType: file.type
-        })
+        .upload(fileName, file, { cacheControl: '3600', upsert: false, contentType: file.type })
       if (uploadError) throw uploadError
       const { data: { publicUrl } } = supabase.storage
         .from('fotos-bicicletas')
@@ -137,9 +132,7 @@ export default function Bicicletas() {
         setUploadingFoto(true)
         const nuevaUrl = await uploadFoto(fotoFile, editingId || 'nueva')
         setUploadingFoto(false)
-        if (nuevaUrl) {
-          fotoUrl = nuevaUrl
-        }
+        if (nuevaUrl) fotoUrl = nuevaUrl
       }
       const data: any = {
         cliente_id: formData.cliente_id || null,
@@ -262,10 +255,10 @@ export default function Bicicletas() {
               <div><label className="block text-sm font-medium text-slate-700 mb-1">Año</label><input type="number" value={formData.año} onChange={(e) => setFormData({...formData, año: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" /></div>
             </div>
 
-            {/* SECCIÓN DE FOTO */}
+            {/* ✅ SECCIÓN DE FOTO CON DOBLE OPCIÓN: CÁMARA O GALERÍA */}
             <div className="border-t border-slate-200 pt-4">
               <label className="block text-sm font-medium text-slate-700 mb-2">Foto de la Bicicleta</label>
-              <div className="flex items-center gap-4">
+              <div className="flex items-start gap-4 flex-wrap">
                 {fotoPreview ? (
                   <div className="relative">
                     <img
@@ -291,19 +284,20 @@ export default function Bicicletas() {
                     <Camera className="w-8 h-8 text-slate-400" />
                   </div>
                 )}
-                <div className="flex-1">
-                  <label className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 text-sm w-fit">
-                    <Upload className="w-4 h-4 text-slate-600" />
-                    <span>{fotoFile ? 'Cambiar foto' : 'Subir/Cambiar foto'}</span>
-                    {/* Sin capture: el celular ofrece cámara O galería */}
-                    <input
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp"
-                      onChange={handleFotoChange}
-                      className="hidden"
-                    />
-                  </label>
-                  <p className="text-xs text-slate-500 mt-2">Máximo 5MB. Formatos aceptados: JPG, PNG, WEBP. En el celular podrás elegir cámara o galería.</p>
+                <div className="flex-1 min-w-[200px]">
+                  <div className="flex flex-wrap gap-2">
+                    <label className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 text-sm">
+                      <Camera className="w-4 h-4 text-slate-600" />
+                      <span>Tomar foto</span>
+                      <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={handleFotoChange} className="hidden" />
+                    </label>
+                    <label className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 rounded-lg cursor-pointer hover:bg-slate-50 text-sm">
+                      <Upload className="w-4 h-4 text-slate-600" />
+                      <span>Subir de galería</span>
+                      <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleFotoChange} className="hidden" />
+                    </label>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-2">Máximo 5MB. Formatos: JPG, PNG, WEBP. Usa "Tomar foto" para la cámara o "Subir de galería" para elegir una imagen existente.</p>
                 </div>
               </div>
             </div>

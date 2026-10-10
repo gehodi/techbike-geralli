@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { hoyLocal } from '../utils/fechas'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { Edit, X, Search, Eye, Package, Ban, Save, Plus, Wrench, CheckCircle, AlertTriangle, Lock, Camera, Shield } from 'lucide-react'
@@ -497,7 +498,7 @@ export default function OrdenesInternas() {
         .from('ordenes_servicio')
         .update({
           estado: 'Completada',
-          fecha_entrega_real: new Date().toISOString().split('T')[0],
+          fecha_entrega_real: hoyLocal(),
           costo_real: costoRealCalculado
         })
         .eq('id', completionOrdenId)

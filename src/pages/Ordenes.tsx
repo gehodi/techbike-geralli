@@ -6,6 +6,8 @@ import toast from 'react-hot-toast'
 import ModalDetalle from '../components/ModalDetalle'
 import SelectorBicicletaCliente from '../components/SelectorBicicletaCliente'
 import ControlesPaginacion from '../components/ControlesPaginacion'
+// ✅ CAMBIO 1: utilidades de fecha local
+import { hoyLocal } from '../utils/fechas'
 
 interface OrdenServicio {
   id: number
@@ -147,7 +149,6 @@ export default function Ordenes() {
         if (idsCoincidentes.length > 0) partes.push(`id.in.(${idsCoincidentes.join(',')})`)
         orString = partes.join(',')
       }
-
       // ✅ FILTRO: Excluir órdenes internas
       let countQuery = supabase
         .from('ordenes_servicio')
@@ -157,10 +158,8 @@ export default function Ordenes() {
       const { count, error: countError } = await countQuery
       if (countError) throw countError
       setTotalRegistros(count || 0)
-
       const from = (paginaActual - 1) * registrosPorPagina
       const to = from + registrosPorPagina - 1
-      
       // ✅ JOIN con bicicletas_adquiridas para obtener la foto
       let query = supabase
         .from('ordenes_servicio')
@@ -177,17 +176,15 @@ export default function Ordenes() {
       if (orString) query = query.or(orString)
       const { data, error } = await query
       if (error) throw error
-      
       const procesadas = data?.map((o: any) => {
         // ✅ CORRECCIÓN 3: Usar foto de bicicletas_adquiridas si existe, sino de bicicletas
         const fotoCliente = o.bicicletas?.foto_principal_url || null
         const fotoAdquirida = o.bicicletas_adquiridas?.foto_url || null
-        const bicicletaInfo = o.bicicletas 
+        const bicicletaInfo = o.bicicletas
           ? `${o.bicicletas.marca || ''} ${o.bicicletas.modelo || ''}`.trim()
-          : (o.bicicletas_adquiridas 
+          : (o.bicicletas_adquiridas
             ? `${o.bicicletas_adquiridas.marca || ''} ${o.bicicletas_adquiridas.modelo || ''}`.trim()
             : 'Sin bicicleta')
-        
         return {
           ...o,
           cliente_nombre: o.clientes ? `${o.clientes.nombres} ${o.clientes.apellidos}` : 'Sin cliente',
@@ -283,6 +280,11 @@ export default function Ordenes() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    // ✅ CAMBIO 2 (BUG-2): no permitir guardar en estado Completada sin mecánico asignado
+    if (formData.estado === 'Completada' && !formData.mecanico_id) {
+      toast.error('Una orden en estado Completada debe tener mecánico asignado. Selecciona el mecánico antes de guardar.')
+      return
+    }
     try {
       const data = {
         cliente_id: modoOrden === 'cliente' ? (formData.cliente_id || null) : null,
@@ -305,7 +307,6 @@ export default function Ordenes() {
         precios_a_costo: modoOrden === 'interna',
         numero_orden: modoOrden === 'interna' ? '' : formData.numero_orden
       }
-
       let ordenId = editingId
       if (editingId) {
         const { error } = await supabase.from('ordenes_servicio').update(data).eq('id', editingId)
@@ -322,14 +323,13 @@ export default function Ordenes() {
             })
           }
         }
-        await supabase.from('detalle_ordenes_servicio').delete().eq('orden_id', editingId)
+        await supabase.from('detalle_ordenes_servicio').delete().eq('id', editingId)
       } else {
         const { data: nuevaOrden, error } = await supabase.from('ordenes_servicio').insert([data]).select().single()
         if (error) throw error
         ordenId = nuevaOrden.id
         toast.success(`Orden registrada`)
       }
-
       const todosLosDetalles = [
         ...detalleServicios.map(s => ({
           orden_id: ordenId, tipo: 'servicio', servicio_id: s.servicio_id,
@@ -340,7 +340,6 @@ export default function Ordenes() {
           descripcion: r.nombre, cantidad: r.cantidad, precio_unitario: r.precio_unitario, subtotal: r.subtotal, estado_item: 'reservado'
         }))
       ]
-
       if (todosLosDetalles.length > 0) {
         const { error: errorDetalles } = await supabase.from('detalle_ordenes_servicio').insert(todosLosDetalles)
         if (errorDetalles) throw errorDetalles
@@ -357,7 +356,6 @@ export default function Ordenes() {
           }
         }
       }
-
       if (modoOrden === 'interna' && !editingId && formData.bicicleta_adquirida_id) {
         await supabase.from('bicicletas_adquiridas').update({ estado: 'en_reparacion' }).eq('id', parseInt(formData.bicicleta_adquirida_id))
         fetchBicicletasUsadas()
@@ -373,20 +371,20 @@ export default function Ordenes() {
     const esInterna = o.tipo_orden === 'interna_bicicleta_usada'
     setModoOrden(esInterna ? 'interna' : 'cliente')
     setFormData({
-      numero_orden: o.numero_orden, 
-      cliente_id: o.cliente_id || '', 
+      numero_orden: o.numero_orden,
+      cliente_id: o.cliente_id || '',
       bicicleta_id: o.bicicleta_id || '',
-      mecanico_id: o.mecanico_id?.toString() || '', 
+      mecanico_id: o.mecanico_id?.toString() || '',
       estado: o.estado || 'Pendiente',
-      diagnostico: o.diagnostico || '', 
+      diagnostico: o.diagnostico || '',
       trabajo_realizado: o.trabajo_realizado || '',
-      costo_estimado: o.costo_estimado?.toString() || '', 
+      costo_estimado: o.costo_estimado?.toString() || '',
       costo_real: o.costo_real?.toString() || '',
-      fecha_ingreso: o.fecha_ingreso || '', 
+      fecha_ingreso: o.fecha_ingreso || '',
       fecha_entrega_estimada: o.fecha_entrega_estimada || '',
-      fecha_entrega_real: o.fecha_entrega_real || '', 
+      fecha_entrega_real: o.fecha_entrega_real || '',
       notas: o.notas || '',
-      sintomas_cliente: o.sintomas_cliente || '', 
+      sintomas_cliente: o.sintomas_cliente || '',
       trabajos_cotizados: o.trabajos_cotizados || '',
       cotizacion_id: o.cotizacion_id?.toString() || '',
       bicicleta_adquirida_id: o.bicicleta_adquirida_id?.toString() || ''
@@ -414,8 +412,13 @@ export default function Ordenes() {
     }
   }
 
+  // ✅ CAMBIO 3 (BUG-2): bloquear apertura del modal de completado sin mecánico asignado
   async function abrirModalCompletado(orden: OrdenServicio) {
     if (!orden.id) { toast.error('ID de orden no válido'); return }
+    if (!orden.mecanico_id) {
+      toast.error('Primero asigna un mecánico: usa el botón Editar (lápiz) de esta orden, selecciona el mecánico y guarda. Luego podrás completarla.')
+      return
+    }
     const { data: detalleData, error } = await supabase.from('detalle_ordenes_servicio').select('*').eq('orden_id', orden.id)
     if (error) { toast.error('Error cargando detalle: ' + error.message); return }
     const todosLosDetalles: DetalleItem[] = (detalleData || []).map((d: any) => ({
@@ -436,6 +439,13 @@ export default function Ordenes() {
   async function confirmarCompletado() {
     if (completandoOrden) { toast.error('Ya se está procesando esta orden'); return }
     if (!completionOrdenId) { toast.error('ID de orden no válido'); return }
+    // ✅ CAMBIO 4 (BUG-2): doble verificación de mecánico antes de confirmar
+    const ordenACompletar = ordenes.find(o => o.id === completionOrdenId)
+    if (ordenACompletar && !ordenACompletar.mecanico_id) {
+      toast.error('Esta orden no tiene mecánico asignado. Asignalo antes de completar.')
+      setShowCompletionModal(false)
+      return
+    }
     setCompletandoOrden(true)
     try {
       const { data: detallesBD, error: errorDetalles } = await supabase.from('detalle_ordenes_servicio').select('*').eq('orden_id', completionOrdenId)
@@ -451,6 +461,7 @@ export default function Ordenes() {
       for (const det of (detallesBD || []).filter((d: any) => d.tipo === 'repuesto')) {
         if (!det.item_inventario_id) continue
         const ajuste = completionData[det.id] || { usada: det.cantidad, dañada: 0 }
+        // ⚠️ SIN CAMBIO 5: se conservan las comillas dobles de tu versión original (funcionan correctamente)
         const { data: itemActual, error: errorItem } = await supabase.from('inventario').select('stock_actual, stock_reservado, "stock_dañado"').eq('id', det.item_inventario_id).single()
         if (errorItem) throw errorItem
         const nuevoStockActual = itemActual.stock_actual - ajuste.usada - ajuste.dañada
@@ -481,11 +492,11 @@ export default function Ordenes() {
       for (const det of (detallesBD || []).filter((d: any) => d.tipo === 'servicio')) {
         await supabase.from('detalle_ordenes_servicio').update({ estado_item: 'completado', cantidad_usada: det.cantidad }).eq('id', det.id)
       }
+      // ✅ CAMBIO 4 (BUG-4): fecha de entrega en calendario local (sin desfase UTC)
       const { error: errorOrden } = await supabase.from('ordenes_servicio').update({
-        estado: 'Completada', fecha_entrega_real: new Date().toISOString().split('T')[0], costo_real: costoRealCalculado
+        estado: 'Completada', fecha_entrega_real: hoyLocal(), costo_real: costoRealCalculado
       }).eq('id', completionOrdenId)
       if (errorOrden) throw errorOrden
-
       const ordenActual = ordenes.find(o => o.id === completionOrdenId)
       if (ordenActual?.tipo_orden === 'interna_bicicleta_usada' && ordenActual.bicicleta_adquirida_id) {
         await supabase.from('bicicletas_adquiridas').update({ estado: 'disponible_venta' }).eq('id', ordenActual.bicicleta_adquirida_id)
@@ -546,11 +557,11 @@ export default function Ordenes() {
             <h2 className="text-lg font-semibold text-slate-800">{editingId ? `Editar Orden ${formData.numero_orden}` : 'Nueva Orden'}</h2>
             {!editingId && (
               <div className="flex bg-slate-100 p-1 rounded-lg">
-                <button type="button" onClick={() => setModoOrden('cliente')} 
+                <button type="button" onClick={() => setModoOrden('cliente')}
                   className={`px-4 py-2 rounded-md text-sm font-medium transition ${modoOrden === 'cliente' ? 'bg-white shadow text-blue-600' : 'text-slate-500'}`}>
                   <span className="flex items-center gap-2"><Briefcase className="w-4 h-4"/> Cliente (Taller)</span>
                 </button>
-                <button type="button" onClick={() => setModoOrden('interna')} 
+                <button type="button" onClick={() => setModoOrden('interna')}
                   className={`px-4 py-2 rounded-md text-sm font-medium transition ${modoOrden === 'interna' ? 'bg-white shadow text-green-600' : 'text-slate-500'}`}>
                   <span className="flex items-center gap-2"><Wrench className="w-4 h-4"/> Interna (Bici Usada)</span>
                 </button>
@@ -589,7 +600,8 @@ export default function Ordenes() {
                 </div>
               )}
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Mecánico</label>
+                {/* ✅ CAMBIO 6: asterisco rojo en Mecánico cuando el estado es Completada */}
+                <label className="block text-sm font-medium text-slate-700 mb-1">Mecánico {formData.estado === 'Completada' && <span className="text-red-500">*</span>}</label>
                 <select value={formData.mecanico_id} onChange={(e) => setFormData({...formData, mecanico_id: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
                   <option value="">Sin asignar</option>
                   {mecanicos.map(m => <option key={m.id} value={m.id}>{m.nombres} {m.apellidos}</option>)}
@@ -749,7 +761,14 @@ export default function Ordenes() {
                           ) : o.cliente_nombre}
                         </td>
                         <td className="px-6 py-4 text-sm text-slate-600">{o.bicicleta_info}</td>
-                        <td className="px-6 py-4 text-sm text-slate-600">{o.mecanico_nombre}</td>
+                        {/* ✅ CAMBIO 6: alerta visual cuando falta mecánico en orden activa */}
+                        <td className="px-6 py-4 text-sm">
+                          {!o.mecanico_id && (o.estado === 'Pendiente' || o.estado === 'En Proceso') ? (
+                            <span className="text-amber-600 font-medium flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Sin asignar</span>
+                          ) : (
+                            <span className="text-slate-600">{o.mecanico_nombre}</span>
+                          )}
+                        </td>
                         <td className="px-6 py-4 text-sm text-slate-600">{formatDate(o.fecha_ingreso)}</td>
                         <td className="px-6 py-4"><span className={`px-2 py-1 rounded-full text-xs font-medium ${getEstadoColor(o.estado)}`}>{o.estado}</span></td>
                         <td className="sticky right-0 bg-white group-hover:bg-slate-50 border-l-2 border-slate-200 px-6 py-4 text-right z-10 shadow-[-4px_0_6px_-1px_rgba(0,0,0,0.05)]">
@@ -764,7 +783,8 @@ export default function Ordenes() {
                                 <button onClick={() => setModalDetalle(o)} className="p-2 text-slate-600 hover:bg-slate-100 rounded" title="Ver detalle"><Eye className="w-4 h-4" /></button>
                                 <button onClick={() => handleEdit(o)} className="p-2 text-blue-600 hover:bg-blue-50 rounded" title="Editar"><Edit className="w-4 h-4" /></button>
                                 {(o.estado === 'Pendiente' || o.estado === 'En Proceso') && (
-                                  <button onClick={() => abrirModalCompletado(o)} className="p-2 text-green-600 hover:bg-green-50 rounded" title="Completar orden"><CheckCircle className="w-4 h-4" /></button>
+                                  /* ✅ CAMBIO 6: tooltip dinámico en el botón Completar */
+                                  <button onClick={() => abrirModalCompletado(o)} className="p-2 text-green-600 hover:bg-green-50 rounded" title={o.mecanico_id ? 'Completar orden' : 'Asigna mecánico para poder completar'}><CheckCircle className="w-4 h-4" /></button>
                                 )}
                                 {o.estado !== 'Cancelada' && o.estado !== 'Completada' && (
                                   <button onClick={() => handleCancelarOrden(o.id, o.numero_orden)} className="p-2 text-red-600 hover:bg-red-50 rounded" title="Cancelar orden"><Ban className="w-4 h-4" /></button>

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { hoyLocal } from '../utils/fechas'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { Plus, X, Search, Eye, AlertTriangle, CheckCircle, XCircle, Shield, Clock, Wrench, FileText } from 'lucide-react'
@@ -120,7 +121,7 @@ export default function ReclamacionesGarantia() {
 
   async function fetchGarantiasDisponibles() {
     try {
-      const hoy = new Date().toISOString().split('T')[0]
+      const hoy = hoyLocal()
 
       const { data, error } = await supabase
         .from('garantias')
@@ -223,7 +224,7 @@ export default function ReclamacionesGarantia() {
           tipo_orden: 'garantia',
           reclamacion_garantia_id: reclamacion.id,
           estado: 'Pendiente',
-          fecha_ingreso: new Date().toISOString().split('T')[0],
+          fecha_ingreso: hoyLocal(),
           numero_orden: '',
           diagnostico: reclamacion.descripcion_falla,
           notas: `Reclamación: ${reclamacion.numero_reclamacion}`

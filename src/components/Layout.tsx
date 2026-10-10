@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { hoyLocal, fechaLocalISO } from '../utils/fechas'
 import { Link, useLocation, Outlet } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabase'
@@ -62,10 +63,10 @@ export default function Layout() {
         .select('*', { count: 'exact', head: true })
         .eq('estado_aprobacion', 'Pendiente')
 
-      const hoy = new Date().toISOString().split('T')[0]
+      const hoy = hoyLocal()
       const fechaLimite = new Date()
       fechaLimite.setDate(fechaLimite.getDate() + 15)
-      const fechaLimiteStr = fechaLimite.toISOString().split('T')[0]
+      const fechaLimiteStr = fechaLocalISO(fechaLimite)
       const { count: garantiasPorVencer } = await supabase
         .from('garantias')
         .select('*', { count: 'exact', head: true })

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { hoyLocal } from '../utils/fechas'
 import { supabase } from '../lib/supabase'
 import { Plus, Edit, Trash2, Save, X, Search, Eye, CheckCircle, Wrench, Package, Camera, Lock } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -341,7 +342,7 @@ export default function Cotizaciones() {
       const { data: nuevaOrden, error: errorOrden } = await supabase.from('ordenes_servicio').insert([{
         numero_orden: nuevoNumeroOrden, cliente_id: solicitudData.cliente_id, bicicleta_id: solicitudData.bicicleta_id,
         mecanico_id: null, estado: 'Pendiente', diagnostico: solicitudData.sintomas || '', trabajo_realizado: '',
-        costo_estimado: cotizacion.total, costo_real: 0, fecha_ingreso: new Date().toISOString().split('T')[0],
+        costo_estimado: cotizacion.total, costo_real: 0, fecha_ingreso: hoyLocal(),
         fecha_entrega_estimada: cotizacion.fecha_entrega_estimada, sintomas_cliente: solicitudData.sintomas,
         trabajos_cotizados: cotizacion.notas, cotizacion_id: cotizacion.id, notas: `Generada desde cotización #${cotizacion.id}`
       }]).select().single()
@@ -408,7 +409,7 @@ export default function Cotizaciones() {
   }
 
   function resetForm() {
-    setFormData({ solicitud_id: '', fecha_cotizacion: new Date().toISOString().split('T')[0], fecha_entrega_estimada: '', notas: '' })
+    setFormData({ solicitud_id: '', fecha_cotizacion: hoyLocal(), fecha_entrega_estimada: '', notas: '' })
     setEditingId(null); setShowForm(false)
     setDetalleServicios([]); setDetalleRepuestos([])
     setNuevoServicio({ servicio_id: '', cantidad: '1' }); setNuevoRepuesto({ item_id: '', cantidad: '1' })
