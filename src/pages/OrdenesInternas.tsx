@@ -2,10 +2,12 @@ import { useState, useEffect, useRef } from 'react'
 import { hoyLocal } from '../utils/fechas'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { Edit, X, Search, Eye, Package, Ban, Save, Plus, Wrench, CheckCircle, AlertTriangle, Lock, Camera, Shield } from 'lucide-react'
+import { Edit, X, Search, Eye, Package, Ban, Save, Plus, Wrench, CheckCircle, AlertTriangle, Lock, Camera, Shield, RefreshCw, Clock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import ModalDetalle from '../components/ModalDetalle'
 import ControlesPaginacion from '../components/ControlesPaginacion'
+import { programarOrden, reprogramarOrden, liberarProgramacion, previewPromesa } from '../utils/scheduler'
+import type { ResultadoProgramacion } from '../utils/scheduler'
 
 interface OrdenServicio {
   id: number
@@ -28,11 +30,18 @@ interface OrdenServicio {
   detalles_requeridos: string
   fecha_registro: string
   tipo_orden: string
+  descripcion_interna?: string | null
   reclamacion_garantia_id?: number
   numero_reclamacion?: string
 }
-
-interface Servicio { id: number; nombre: string; costo_mano_obra: number }
+interface Servicio {
+  id: number
+  nombre: string
+  costo_mano_obra: number
+  tiempo_preparacion_min: number
+  tiempo_ejecucion_min: number
+  tiempo_limpieza_min: number
+}
 interface ItemInventario { id: number; nombre: string; stock_actual: number; stock_reservado: number; precio_compra: number }
 interface BicicletaUsada { id: number; codigo_inventario: string; marca: string; modelo: string }
 interface DetalleItem {
@@ -79,11 +88,14 @@ export default function OrdenesInternas() {
   const [paginaActual, setPaginaActual] = useState(1)
   const [registrosPorPagina, setRegistrosPorPagina] = useState(25)
   const [totalRegistros, setTotalRegistros] = useState(0)
+  const [promesaPreview, setPromesaPreview] = useState<ResultadoProgramacion | null>(null)
+  const [calculandoPromesa, setCalculandoPromesa] = useState(false)
   const [formData, setFormData] = useState({
     numero_orden: '', bicicleta_adquirida_id: '', mecanico_id: '',
     estado: 'Pendiente', diagnostico: '', trabajo_realizado: '',
     costo_estimado: '', costo_real: '', fecha_ingreso: '',
-    fecha_entrega_estimada: '', fecha_entrega_real: '', notas: ''
+    fecha_entrega_estimada: '', fecha_entrega_real: '', notas: '',
+    descripcion_interna: ''
   })
 
   useEffect(() => {
@@ -93,6 +105,20 @@ export default function OrdenesInternas() {
   useEffect(() => {
     fetchOrdenes()
   }, [paginaActual, registrosPorPagina, searchTerm, ordenesIndex, filtroTipo])
+
+  // ✅ FCS: asistente de promesa en vivo (las internas son prioridad 4: horas valle)
+  useEffect(() => {
+    if (!showForm) { setPromesaPreview(null); return }
+    const t = setTimeout(async () => {
+      const lineas = detalleServicios.filter(s => s.servicio_id).map(s => ({ servicio_id: s.servicio_id as number, cantidad: s.cantidad }))
+      if (lineas.length === 0) { setPromesaPreview(null); return }
+      setCalculandoPromesa(true)
+      const r = await previewPromesa(lineas, 4, servicios)
+      setPromesaPreview(r)
+      setCalculandoPromesa(false)
+    }, 400)
+    return () => clearTimeout(t)
+  }, [detalleServicios, showForm, servicios])
 
   async function fetchOrdenesIndex() {
     try {
@@ -135,14 +161,12 @@ export default function OrdenesInternas() {
         if (idsCoincidentes.length > 0) partes.push(`id.in.(${idsCoincidentes.join(',')})`)
         orString = partes.join(',')
       }
-
       let countQuery = supabase.from('ordenes_servicio').select('*', { count: 'exact', head: true })
         .in('tipo_orden', ['interna_bicicleta_usada', 'garantia'])
       if (orString) countQuery = countQuery.or(orString)
       const { count, error: countError } = await countQuery
       if (countError) throw countError
       setTotalRegistros(count || 0)
-
       const from = (paginaActual - 1) * registrosPorPagina
       const to = from + registrosPorPagina - 1
       let query = supabase
@@ -159,19 +183,18 @@ export default function OrdenesInternas() {
       if (orString) query = query.or(orString)
       const { data, error } = await query
       if (error) throw error
-
       const procesadas = data?.map((o: any) => {
         const esGarantia = o.tipo_orden === 'garantia'
         const biciDesdeReclamacion = o.reclamaciones_garantia?.garantias?.bicicletas_adquiridas
         const biciDirecta = o.bicicletas_adquiridas
         return {
           ...o,
-          bicicleta_codigo: esGarantia 
+          bicicleta_codigo: esGarantia
             ? (biciDesdeReclamacion?.codigo_inventario || 'N/A')
             : (biciDirecta?.codigo_inventario || ''),
           bicicleta_info: esGarantia
             ? (biciDesdeReclamacion ? `${biciDesdeReclamacion.marca} ${biciDesdeReclamacion.modelo}` : 'Garantía')
-            : (biciDirecta ? `${biciDirecta.marca} ${biciDirecta.modelo}` : 'Sin bicicleta'),
+            : (biciDirecta ? `${biciDirecta.marca} ${biciDirecta.modelo}` : (o.descripcion_interna || 'Sin bicicleta')),
           bicicleta_foto: esGarantia
             ? (biciDesdeReclamacion?.foto_url || null)
             : (biciDirecta?.foto_url || null),
@@ -179,7 +202,6 @@ export default function OrdenesInternas() {
           numero_reclamacion: o.reclamaciones_garantia?.numero_reclamacion || null
         }
       }) || []
-
       let filtradas = procesadas
       if (filtroTipo === 'interna') {
         filtradas = procesadas.filter(o => o.tipo_orden === 'interna_bicicleta_usada')
@@ -201,7 +223,7 @@ export default function OrdenesInternas() {
   }
 
   async function fetchServicios() {
-    const { data } = await supabase.from('servicios').select('id, nombre, costo_mano_obra').eq('activo', true).order('nombre')
+    const { data } = await supabase.from('servicios').select('id, nombre, costo_mano_obra, tiempo_preparacion_min, tiempo_ejecucion_min, tiempo_limpieza_min').eq('activo', true).order('nombre')
     setServicios(data || [])
   }
 
@@ -266,6 +288,16 @@ export default function OrdenesInternas() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    // ✅ BUG-2: no permitir guardar en estado Completada sin mecánico asignado
+    if (formData.estado === 'Completada' && !formData.mecanico_id) {
+      toast.error('Una orden en estado Completada debe tener mecánico asignado. Selecciona el mecánico antes de guardar.')
+      return
+    }
+    // ✅ orden interna sin bicicleta exige descripción del objeto/trabajo
+    if (!formData.bicicleta_adquirida_id && !formData.descripcion_interna.trim()) {
+      toast.error('Describe el objeto o trabajo (ej. rueda delantera 26") o selecciona una bicicleta del inventario.')
+      return
+    }
     try {
       const data: any = {
         bicicleta_adquirida_id: formData.bicicleta_adquirida_id ? parseInt(formData.bicicleta_adquirida_id) : null,
@@ -279,16 +311,16 @@ export default function OrdenesInternas() {
         fecha_entrega_estimada: formData.fecha_entrega_estimada || null,
         fecha_entrega_real: formData.fecha_entrega_real || null,
         notas: formData.notas || null,
+        descripcion_interna: formData.descripcion_interna.trim() || null,
         tipo_orden: 'interna_bicicleta_usada',
         precios_a_costo: true
       }
-
-      // Solo en INSERT se envía vacío para que el trigger (ya corregido) genere el correlativo
+      // Solo en INSERT se envía vacío para que el trigger genere el correlativo
       if (!editingId) {
         data.numero_orden = ''
       }
-
-      let ordenId = editingId
+      // ✅ CORREGIDO: tipado explícito para evitar number | null en programarOrden
+      let ordenId: number = editingId ?? 0
       if (editingId) {
         const { error } = await supabase.from('ordenes_servicio').update(data).eq('id', editingId)
         if (error) throw error
@@ -310,7 +342,6 @@ export default function OrdenesInternas() {
           fetchBicicletasUsadas()
         }
       }
-
       const todosLosDetalles = [
         ...detalleServicios.map(s => ({
           orden_id: ordenId, tipo: 'servicio', servicio_id: s.servicio_id,
@@ -321,7 +352,6 @@ export default function OrdenesInternas() {
           descripcion: r.nombre, cantidad: r.cantidad, precio_unitario: r.precio_unitario, subtotal: r.subtotal, estado_item: 'reservado'
         }))
       ]
-
       if (todosLosDetalles.length > 0) {
         const { error: errorDetalles } = await supabase.from('detalle_ordenes_servicio').insert(todosLosDetalles)
         if (errorDetalles) throw errorDetalles
@@ -332,7 +362,20 @@ export default function OrdenesInternas() {
           }
         }
       }
-
+      // ✅ FCS: programación automática al guardar
+      if (editingId) {
+        if (formData.estado !== 'Cancelada') {
+          const r = await reprogramarOrden(editingId, 'Edición de orden interna', formData.mecanico_id ? parseInt(formData.mecanico_id) : undefined)
+          if (r.ok) toast.success(`Orden reprogramada: entrega ${r.fechaPrometida} con ${r.mecanicoNombre}`)
+          else if (detalleServicios.length === 0) toast('Orden actualizada sin programar: agrega servicios y usa Reprogramar.')
+          else toast.error(r.error || 'No se pudo reprogramar')
+        }
+      } else {
+        const r = await programarOrden(ordenId, { mecanicoForzado: formData.mecanico_id ? parseInt(formData.mecanico_id) : undefined })
+        if (r.ok) toast.success(`Orden programada: entrega ${r.fechaPrometida} con ${r.mecanicoNombre}`)
+        else if (detalleServicios.length === 0) toast('Orden registrada sin programar: agrega servicios y usa Reprogramar.')
+        else toast.error(r.error || 'No se pudo programar')
+      }
       resetForm(); fetchOrdenes(); fetchInventario(); fetchOrdenesIndex()
     } catch (error: any) {
       toast.error('Error: ' + error.message)
@@ -354,7 +397,8 @@ export default function OrdenesInternas() {
       fecha_ingreso: o.fecha_ingreso || '',
       fecha_entrega_estimada: o.fecha_entrega_estimada || '',
       fecha_entrega_real: o.fecha_entrega_real || '',
-      notas: o.notas || ''
+      notas: o.notas || '',
+      descripcion_interna: o.descripcion_interna || ''
     })
     setEditingId(o.id); setShowForm(true); await fetchDetalleOrden(o.id)
     setTimeout(() => {
@@ -363,7 +407,7 @@ export default function OrdenesInternas() {
   }
 
   async function handleCancelarOrden(id: number, numeroOrden: string) {
-    if (!confirm(`¿Está seguro de CANCELAR la orden ${numeroOrden}?\n\nSe liberarán las reservas de inventario.`)) return
+    if (!confirm(`¿Está seguro de CANCELAR la orden ${numeroOrden}?\n\nSe liberarán las reservas de inventario y su programación.`)) return
     try {
       const { data: detalles } = await supabase.from('detalle_ordenes_servicio').select('*').eq('orden_id', id).eq('tipo', 'repuesto')
       for (const rep of (detalles || [])) {
@@ -372,6 +416,8 @@ export default function OrdenesInternas() {
       }
       const { error } = await supabase.from('ordenes_servicio').update({ estado: 'Cancelada' }).eq('id', id)
       if (error) throw error
+      // ✅ FCS: liberar slots programados
+      await liberarProgramacion(id, 'Orden cancelada')
       toast.success(`Orden ${numeroOrden} cancelada y reservas liberadas`)
       fetchOrdenes(); fetchInventario(); fetchOrdenesIndex()
     } catch (error: any) {
@@ -379,8 +425,22 @@ export default function OrdenesInternas() {
     }
   }
 
+  // ✅ FCS: reprogramación manual desde la tabla
+  async function handleReprogramar(o: OrdenServicio) {
+    if (!confirm(`¿Reprogramar la orden ${o.numero_orden}?\n\nEl motor recalculará mecánico y fecha de entrega según la capacidad actual.`)) return
+    const r = await reprogramarOrden(o.id, 'Reprogramación manual desde tabla')
+    if (r.ok) toast.success(`Orden reprogramada: entrega ${r.fechaPrometida} con ${r.mecanicoNombre}`)
+    else toast.error(r.error || 'No se pudo reprogramar')
+    fetchOrdenes()
+  }
+
+  // ✅ BUG-2: bloquear apertura del modal de completado sin mecánico asignado
   async function abrirModalCompletado(orden: OrdenServicio) {
     if (!orden.id) { toast.error('ID de orden no válido'); return }
+    if (!orden.mecanico_id) {
+      toast.error('Primero asigna un mecánico: usa el botón Editar (lápiz) de esta orden, selecciona el mecánico y guarda. Luego podrás completarla.')
+      return
+    }
     const { data: detalleData, error } = await supabase.from('detalle_ordenes_servicio').select('*').eq('orden_id', orden.id)
     if (error) { toast.error('Error cargando detalle: ' + error.message); return }
     const todosLosDetalles: DetalleItem[] = (detalleData || []).map((d: any) => ({
@@ -409,13 +469,17 @@ export default function OrdenesInternas() {
         .eq('id', completionOrdenId)
         .single()
       if (errorOrdenActual) throw errorOrdenActual
-
+      // ✅ BUG-2: doble verificación de mecánico antes de confirmar
+      if (!ordenActual.mecanico_id) {
+        toast.error('Esta orden no tiene mecánico asignado. Asignalo antes de completar.')
+        setShowCompletionModal(false)
+        return
+      }
       const { data: detallesBD, error: errorDetalles } = await supabase
         .from('detalle_ordenes_servicio')
         .select('*')
         .eq('orden_id', completionOrdenId)
       if (errorDetalles) throw errorDetalles
-
       let costoRealCalculado = 0
       let costoManoObra = 0
       let costoRepuestosCliente = 0
@@ -431,7 +495,6 @@ export default function OrdenesInternas() {
           costoRepuestosCliente += subtotal
         }
       }
-
       for (const det of (detallesBD || []).filter((d: any) => d.tipo === 'repuesto')) {
         if (!det.item_inventario_id) continue
         const ajuste = completionData[det.id] || { usada: det.cantidad, dañada: 0 }
@@ -441,18 +504,15 @@ export default function OrdenesInternas() {
           .eq('id', det.item_inventario_id)
           .single()
         if (errorItem) throw errorItem
-
         const nuevoStockActual = itemActual.stock_actual - ajuste.usada - ajuste.dañada
         const nuevoStockReservado = Math.max(0, (itemActual.stock_reservado || 0) - det.cantidad)
         const nuevoStockDanado = (itemActual.stock_dañado || 0) + ajuste.dañada
-
         await supabase.from('inventario').update({
           stock_actual: nuevoStockActual,
           stock_reservado: nuevoStockReservado,
           stock_dañado: nuevoStockDanado,
           estado: nuevoStockActual === 0 ? 'agotado' : 'disponible'
         }).eq('id', det.item_inventario_id)
-
         if (ajuste.usada > 0) {
           await supabase.from('movimientos_inventario').insert({
             item_inventario_id: det.item_inventario_id,
@@ -460,8 +520,8 @@ export default function OrdenesInternas() {
             cantidad: -ajuste.usada,
             stock_anterior: itemActual.stock_actual,
             stock_nuevo: nuevoStockActual,
-            motivo: ordenActual.tipo_orden === 'garantia' 
-              ? `Consumo orden de garantía ${ordenActual.numero_orden}` 
+            motivo: ordenActual.tipo_orden === 'garantia'
+              ? `Consumo orden de garantía ${ordenActual.numero_orden}`
               : `Consumo orden interna completada`,
             orden_id: completionOrdenId,
             fecha_movimiento: new Date().toISOString(),
@@ -486,14 +546,12 @@ export default function OrdenesInternas() {
           estado_item: 'usado'
         }).eq('id', det.id)
       }
-
       for (const det of (detallesBD || []).filter((d: any) => d.tipo === 'servicio')) {
         await supabase.from('detalle_ordenes_servicio').update({
           estado_item: 'completado',
           cantidad_usada: det.cantidad
         }).eq('id', det.id)
       }
-
       const { error: errorOrden } = await supabase
         .from('ordenes_servicio')
         .update({
@@ -503,7 +561,8 @@ export default function OrdenesInternas() {
         })
         .eq('id', completionOrdenId)
       if (errorOrden) throw errorOrden
-
+      // ✅ FCS: marcar programación como completada
+      await supabase.from('programacion_ordenes').update({ estado: 'completada' }).eq('orden_id', completionOrdenId)
       if (ordenActual.tipo_orden === 'garantia' && ordenActual.reclamacion_garantia_id) {
         const { error: errorReclamacion } = await supabase
           .from('reclamaciones_garantia')
@@ -515,13 +574,11 @@ export default function OrdenesInternas() {
           })
           .eq('id', ordenActual.reclamacion_garantia_id)
         if (errorReclamacion) throw errorReclamacion
-
         const { data: reclamacion } = await supabase
           .from('reclamaciones_garantia')
           .select('garantia_id')
           .eq('id', ordenActual.reclamacion_garantia_id)
           .single()
-
         if (reclamacion?.garantia_id) {
           await supabase.from('garantias').update({ estado: 'reclamada' }).eq('id', reclamacion.garantia_id)
           const { data: garantia } = await supabase
@@ -541,8 +598,8 @@ export default function OrdenesInternas() {
               await supabase.from('ventas').update({
                 rentabilidad_neta: nuevaRentabilidad,
                 costo_total_invertido: nuevoCostoInvertido,
-                margen_porcentaje: nuevoCostoInvertido > 0 
-                  ? ((nuevaRentabilidad / nuevoCostoInvertido) * 100) 
+                margen_porcentaje: nuevoCostoInvertido > 0
+                  ? ((nuevaRentabilidad / nuevoCostoInvertido) * 100)
                   : 0
               }).eq('id', garantia.venta_id)
             }
@@ -556,7 +613,6 @@ export default function OrdenesInternas() {
         }
         toast.success(`Orden completada. Costo real: ${formatCurrency(costoRealCalculado)}`)
       }
-
       setShowCompletionModal(false)
       setCompletionOrdenId(null)
       setCompletionData({})
@@ -575,11 +631,13 @@ export default function OrdenesInternas() {
       numero_orden: '', bicicleta_adquirida_id: '', mecanico_id: '',
       estado: 'Pendiente', diagnostico: '', trabajo_realizado: '',
       costo_estimado: '', costo_real: '', fecha_ingreso: '',
-      fecha_entrega_estimada: '', fecha_entrega_real: '', notas: ''
+      fecha_entrega_estimada: '', fecha_entrega_real: '', notas: '',
+      descripcion_interna: ''
     })
     setEditingId(null); setShowForm(false)
     setDetalleServicios([]); setDetalleRepuestos([])
     setNuevoServicio({ servicio_id: '', cantidad: '1' }); setNuevoRepuesto({ item_id: '', cantidad: '1' })
+    setPromesaPreview(null)
   }
 
   const getEstadoColor = (estado: string) => {
@@ -599,11 +657,18 @@ export default function OrdenesInternas() {
     return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Interna</span>
   }
 
-  const formatDate = (d: string) => d ? new Date(d).toLocaleDateString('es-CO') : '-'
+  // ✅ CORREGIDO: fecha local-segura (fecha pura por slice; timestamp completo sí convierte)
+  const formatDate = (d: string) => {
+    if (!d) return '-'
+    const s = String(d)
+    if (s.length <= 10) return `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}`
+    return new Date(s).toLocaleDateString('es-CO')
+  }
   const formatCurrency = (v: number | null | undefined) => {
     if (v === null || v === undefined) return '$0.00'
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v)
   }
+  const fmtMin = (m: number) => `${Math.floor(m / 60)}h ${m % 60}m`
 
   return (
     <div className="space-y-6">
@@ -657,16 +722,16 @@ export default function OrdenesInternas() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div><label className="block text-sm font-medium text-slate-700 mb-1">Número de Orden</label><input type="text" value={formData.numero_orden} disabled className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-slate-50 text-slate-500" /><p className="text-xs text-green-600 mt-1">Se genera automáticamente</p></div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Bicicleta Adquirida *</label>
-                <select value={formData.bicicleta_adquirida_id} onChange={(e) => setFormData({...formData, bicicleta_adquirida_id: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none" required>
-                  <option value="">Seleccionar...</option>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Bicicleta Adquirida — opcional</label>
+                <select value={formData.bicicleta_adquirida_id} onChange={(e) => setFormData({...formData, bicicleta_adquirida_id: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none">
+                  <option value="">Sin bicicleta asociada (ej. rueda, cuadro, accesorio)</option>
                   {bicicletasUsadas.map(b => <option key={b.id} value={b.id}>{b.codigo_inventario} - {b.marca} {b.modelo}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Mecánico</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Mecánico {formData.estado === 'Completada' && <span className="text-red-500">*</span>}</label>
                 <select value={formData.mecanico_id} onChange={(e) => setFormData({...formData, mecanico_id: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none">
-                  <option value="">Sin asignar</option>
+                  <option value="">Sin asignar (lo define el planificador)</option>
                   {mecanicos.map(m => <option key={m.id} value={m.id}>{m.nombres} {m.apellidos}</option>)}
                 </select>
               </div>
@@ -680,6 +745,19 @@ export default function OrdenesInternas() {
                 </select>
               </div>
               <div><label className="block text-sm font-medium text-slate-700 mb-1">Fecha Ingreso *</label><input type="date" value={formData.fecha_ingreso} onChange={(e) => setFormData({...formData, fecha_ingreso: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none" required /></div>
+              <div className="md:col-span-3">
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Objeto / descripción del trabajo {!formData.bicicleta_adquirida_id && <span className="text-red-500">*</span>}
+                </label>
+                <textarea
+                  value={formData.descripcion_interna}
+                  onChange={(e) => setFormData({...formData, descripcion_interna: e.target.value})}
+                  rows={2}
+                  placeholder='Ej.: Rueda delantera 26" - centrado y cambio de rayos; cuadro talla M para pintura...'
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
+                />
+                <p className="text-xs text-slate-500 mt-1">Obligatorio si la orden no está asociada a una bicicleta del inventario.</p>
+              </div>
             </div>
             <div className="border-t border-slate-200 pt-4">
               <h3 className="text-sm font-semibold text-slate-700 mb-3">Detalles Técnicos</h3>
@@ -702,6 +780,23 @@ export default function OrdenesInternas() {
                     <tbody>{detalleServicios.map((item) => (<tr key={item.id} className="border-b border-green-100 last:border-0"><td className="py-2 text-slate-800">{item.nombre}</td><td className="text-right py-2 text-slate-600">{item.cantidad}</td><td className="text-right py-2 text-slate-600">{formatCurrency(item.precio_unitario)}</td><td className="text-right py-2 font-medium text-slate-800">{formatCurrency(item.subtotal)}</td><td className="text-right py-2"><button type="button" onClick={() => eliminarServicio(item.id)} className="text-red-600 hover:text-red-800"><X className="w-4 h-4" /></button></td></tr>))}</tbody>
                     <tfoot><tr className="font-semibold text-slate-800 border-t border-green-300"><td colSpan={3} className="text-right py-2">Total Servicios:</td><td className="text-right py-2">{formatCurrency(totalServicios)}</td><td></td></tr></tfoot>
                   </table>
+                </div>
+              )}
+              {/* ✅ FCS: asistente de promesa de entrega en vivo */}
+              {(calculandoPromesa || promesaPreview) && (
+                <div className={`mt-3 rounded-lg p-3 text-sm ${promesaPreview?.ok ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'}`}>
+                  {calculandoPromesa ? (
+                    <span className="text-slate-600">Calculando promesa de entrega…</span>
+                  ) : promesaPreview?.ok ? (
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-green-800">
+                      <span className="font-semibold flex items-center gap-1"><Clock className="w-4 h-4" /> Promesa de entrega: {formatDate(promesaPreview.fechaPrometida!)}</span>
+                      <span>Mecánico sugerido: {promesaPreview.mecanicoNombre}</span>
+                      <span>Duración: {fmtMin(promesaPreview.minutosTotales || 0)}</span>
+                      <span className="text-xs text-green-700">(interna: se ubica en horas valle)</span>
+                    </div>
+                  ) : (
+                    <span className="text-amber-800 flex items-center gap-1"><AlertTriangle className="w-4 h-4" /> {promesaPreview?.error}</span>
+                  )}
                 </div>
               )}
             </div>
@@ -746,7 +841,7 @@ export default function OrdenesInternas() {
               <div className="p-6 border-b border-slate-200">
                 <div className="flex items-center justify-between">
                   <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
-                    <CheckCircle className="w-5 h-5 text-green-600" /> 
+                    <CheckCircle className="w-5 h-5 text-green-600" />
                     {esGarantia ? 'Completar Orden de Garantía' : 'Completar Orden y Ajustar Inventario'}
                   </h3>
                   {esGarantia && <Shield className="w-6 h-6 text-purple-600" />}
@@ -755,7 +850,7 @@ export default function OrdenesInternas() {
                   <div className="mt-2 bg-purple-50 border border-purple-200 rounded-lg p-3 text-sm">
                     <p className="text-purple-800 font-medium">⚠️ Orden de Garantía</p>
                     <p className="text-purple-700 text-xs mt-1">
-                      Al completar esta orden se cerrará automáticamente la reclamación {ordenActual?.numero_reclamacion || ''} 
+                      Al completar esta orden se cerrará automáticamente la reclamación {ordenActual?.numero_reclamacion || ''}
                       y se recalculará la rentabilidad de la venta original.
                     </p>
                   </div>
@@ -819,7 +914,7 @@ export default function OrdenesInternas() {
                       <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Orden</th>
                       <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Foto</th>
                       <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Tipo</th>
-                      <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Bicicleta</th>
+                      <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Bicicleta / Objeto</th>
                       <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Mecánico</th>
                       <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Ingreso</th>
                       <th className="text-left px-6 py-3 text-sm font-medium text-slate-700">Estado</th>
@@ -836,11 +931,11 @@ export default function OrdenesInternas() {
                         </td>
                         <td className="px-6 py-4">
                           {o.bicicleta_foto ? (
-                            <img 
-                              src={o.bicicleta_foto} 
-                              alt="Foto bicicleta" 
-                              className="h-12 w-12 object-cover rounded-lg border border-slate-200 cursor-pointer hover:scale-110 transition-transform" 
-                              onClick={(e) => { e.stopPropagation(); window.open(o.bicicleta_foto, '_blank') }} 
+                            <img
+                              src={o.bicicleta_foto}
+                              alt="Foto bicicleta"
+                              className="h-12 w-12 object-cover rounded-lg border border-slate-200 cursor-pointer hover:scale-110 transition-transform"
+                              onClick={(e) => { e.stopPropagation(); window.open(o.bicicleta_foto, '_blank') }}
                             />
                           ) : (
                             <div className="h-12 w-12 bg-slate-100 rounded-lg border border-slate-200 flex items-center justify-center">
@@ -850,7 +945,13 @@ export default function OrdenesInternas() {
                         </td>
                         <td className="px-6 py-4">{getTipoOrdenBadge(o.tipo_orden)}</td>
                         <td className="px-6 py-4 text-sm text-slate-600">{o.bicicleta_info}</td>
-                        <td className="px-6 py-4 text-sm text-slate-600">{o.mecanico_nombre}</td>
+                        <td className="px-6 py-4 text-sm">
+                          {!o.mecanico_id && (o.estado === 'Pendiente' || o.estado === 'En Proceso') ? (
+                            <span className="text-amber-600 font-medium flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Sin asignar</span>
+                          ) : (
+                            <span className="text-slate-600">{o.mecanico_nombre}</span>
+                          )}
+                        </td>
                         <td className="px-6 py-4 text-sm text-slate-600">{formatDate(o.fecha_ingreso)}</td>
                         <td className="px-6 py-4"><span className={`px-2 py-1 rounded-full text-xs font-medium ${getEstadoColor(o.estado)}`}>{o.estado}</span></td>
                         <td className="px-6 py-4 text-sm text-right font-medium">{formatCurrency(o.costo_real)}</td>
@@ -858,9 +959,9 @@ export default function OrdenesInternas() {
                           <div className="flex justify-end gap-2">
                             {o.estado === 'Completada' ? (
                               <>
-                                <button 
-                                  onClick={() => navigate(`/orden-completada/${o.id}`)} 
-                                  className="p-2 text-green-600 hover:bg-green-50 rounded" 
+                                <button
+                                  onClick={() => navigate(`/orden-completada/${o.id}`)}
+                                  className="p-2 text-green-600 hover:bg-green-50 rounded"
                                   title="Ver detalle completo"
                                 >
                                   <Eye className="w-4 h-4" />
@@ -874,7 +975,10 @@ export default function OrdenesInternas() {
                                   <button onClick={() => handleEdit(o)} className="p-2 text-blue-600 hover:bg-blue-50 rounded" title="Editar"><Edit className="w-4 h-4" /></button>
                                 )}
                                 {(o.estado === 'Pendiente' || o.estado === 'En Proceso') && (
-                                  <button onClick={() => abrirModalCompletado(o)} className="p-2 text-green-600 hover:bg-green-50 rounded" title="Completar orden"><CheckCircle className="w-4 h-4" /></button>
+                                  <button onClick={() => abrirModalCompletado(o)} className="p-2 text-green-600 hover:bg-green-50 rounded" title={o.mecanico_id ? 'Completar orden' : 'Asigna mecánico para poder completar'}><CheckCircle className="w-4 h-4" /></button>
+                                )}
+                                {(o.estado === 'Pendiente' || o.estado === 'En Proceso') && o.tipo_orden !== 'garantia' && (
+                                  <button onClick={() => handleReprogramar(o)} className="p-2 text-purple-600 hover:bg-purple-50 rounded" title="Reprogramar (recalcular mecánico y fecha)"><RefreshCw className="w-4 h-4" /></button>
                                 )}
                                 {o.estado !== 'Cancelada' && o.estado !== 'Completada' && o.tipo_orden !== 'garantia' && (
                                   <button onClick={() => handleCancelarOrden(o.id, o.numero_orden)} className="p-2 text-red-600 hover:bg-red-50 rounded" title="Cancelar orden"><Ban className="w-4 h-4" /></button>
@@ -900,6 +1004,7 @@ export default function OrdenesInternas() {
           campos={[
             { label: 'Foto Bicicleta', value: modalDetalle.bicicleta_foto, tipo: 'imagen' },
             { label: 'Tipo de Orden', value: modalDetalle.tipo_orden === 'garantia' ? 'Garantía' : 'Interna (Reacondicionamiento)', tipo: 'estado' },
+            { label: 'Objeto / Trabajo (interna)', value: modalDetalle.descripcion_interna || '-', tipo: 'texto' },
             { label: 'Bicicleta', value: `${modalDetalle.bicicleta_codigo} - ${modalDetalle.bicicleta_info}` },
             { label: 'Mecánico', value: modalDetalle.mecanico_nombre },
             { label: 'Estado', value: modalDetalle.estado, tipo: 'estado' },

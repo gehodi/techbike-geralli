@@ -29,10 +29,11 @@ import Garantias from './pages/Garantias'
 import ReclamacionesGarantia from './pages/ReclamacionesGarantia'
 import CertificadoReacondicionamiento from './pages/CertificadoReacondicionamiento'
 import ComprobanteVenta from './pages/ComprobanteVenta'
+import Programacion from './pages/Programacion'
+import ConfiguracionTaller from './pages/ConfiguracionTaller'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
-  
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-100">
@@ -40,14 +41,12 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
       </div>
     )
   }
-  
   if (!user) return <Navigate to="/login" replace />
   return <>{children}</>
 }
 
 function App() {
   const { user, loading } = useAuth()
-
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-100">
@@ -55,7 +54,6 @@ function App() {
       </div>
     )
   }
-
   return (
     <>
       <Toaster
@@ -79,7 +77,6 @@ function App() {
       <Routes>
         {/* Ruta pública de login */}
         <Route path="/login" element={!user ? <Login /> : <Navigate to="/" replace />} />
-        
         {/* Rutas protegidas dentro del Layout */}
         <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
           <Route path="/" element={<Dashboard />} />
@@ -90,6 +87,7 @@ function App() {
           <Route path="/cotizaciones" element={<Cotizaciones />} />
           <Route path="/ordenes" element={<Ordenes />} />
           <Route path="/ordenes-internas" element={<OrdenesInternas />} />
+          <Route path="/programacion" element={<Programacion />} />
           <Route path="/orden-completada/:id" element={<DetalleOrdenCompletada />} />
           <Route path="/inventario" element={<Inventario />} />
           <Route path="/requisiciones" element={<Requisiciones />} />
@@ -106,12 +104,11 @@ function App() {
           <Route path="/ventas-bicicletas" element={<VentasBicicletas />} />
           <Route path="/garantias" element={<Garantias />} />
           <Route path="/reclamaciones-garantia" element={<ReclamacionesGarantia />} />
+          <Route path="/configuracion-taller" element={<ConfiguracionTaller />} />
         </Route>
-        
         {/* Rutas fuera del Layout para impresión limpia */}
         <Route path="/certificado-reacondicionamiento/:id" element={<CertificadoReacondicionamiento />} />
         <Route path="/comprobante-venta/:id" element={<ComprobanteVenta />} />
-        
         {/* Ruta comodín - redirige al dashboard */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

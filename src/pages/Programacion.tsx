@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { CalendarDays, RefreshCw, AlertTriangle, Clock, PlayCircle, Trash2, X } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { cargarCalendario, calcularCargaRango, programarOrden, reprogramarOrden, liberarProgramacion } from '../utils/scheduler'
+import { cargarCalendario, calcularCargaRango, programarOrden, reprogramarOrden, liberarProgramacion, liberarCotizacion } from '../utils/scheduler'
 
 interface SlotView {
   id: number
@@ -11,12 +11,14 @@ interface SlotView {
   hora_inicio: string
   hora_fin: string
   minutos: number
-  orden_id: number
+  orden_id: number | null
+  cotizacion_id: number | null
   numero_orden: string
   cliente: string
   prioridad: number
   estado_orden: string
   estado_prog: string
+  esTentativa: boolean
 }
 interface MecanicoView { id: number; nombres: string; apellidos: string }
 interface OrdenSinProgramar { id: number; numero_orden: string; cliente: string; prioridad: number; estado: string }
@@ -64,30 +66,53 @@ export default function Programacion() {
       setMecanicos(mec || [])
       const { data: sl } = await supabase
         .from('programacion_slots')
-        .select('id, mecanico_id, fecha, hora_inicio, hora_fin, minutos, programacion_ordenes(id, orden_id, estado, ordenes_servicio(numero_orden, prioridad, estado, clientes(nombres, apellidos)))')
+        .select('id, mecanico_id, fecha, hora_inicio, hora_fin, minutos, programacion_ordenes(id, orden_id, estado, cotizacion_id, cotizaciones(id, estado, fecha_cotizacion), ordenes_servicio(numero_orden, prioridad, estado, clientes(nombres, apellidos)))')
         .gte('fecha', h)
       const planos: SlotView[] = (sl || [])
-        .map((s: any) => ({
-          id: s.id,
-          mecanico_id: s.mecanico_id,
-          fecha: s.fecha,
-          hora_inicio: s.hora_inicio,
-          hora_fin: s.hora_fin,
-          minutos: s.minutos,
-          orden_id: s.programacion_ordenes?.orden_id,
-          numero_orden: s.programacion_ordenes?.ordenes_servicio?.numero_orden || `#${s.programacion_ordenes?.orden_id}`,
-          cliente: s.programacion_ordenes?.ordenes_servicio?.clientes ? `${s.programacion_ordenes.ordenes_servicio.clientes.nombres} ${s.programacion_ordenes.ordenes_servicio.clientes.apellidos}` : 'Interna',
-          prioridad: s.programacion_ordenes?.ordenes_servicio?.prioridad ?? 2,
-          estado_orden: s.programacion_ordenes?.ordenes_servicio?.estado || '',
-          estado_prog: s.programacion_ordenes?.estado || ''
-        }))
-        .filter((s: SlotView) => s.estado_prog !== 'cancelada')
+        .map((s: any) => {
+          const head = s.programacion_ordenes
+          const esTentativa = head?.estado === 'tentativa'
+          let incluir = true
+          if (esTentativa) {
+            const cot = head?.cotizaciones
+            if (!cot || cot.estado !== 'Pendiente') incluir = false
+            else {
+              const vence = addDias((cot.fecha_cotizacion || h).slice(0, 10), calendario.config.dias_validez_promesa)
+              incluir = vence >= h
+            }
+          }
+          return {
+            incluir,
+            slot: {
+              id: s.id,
+              mecanico_id: s.mecanico_id,
+              fecha: s.fecha,
+              hora_inicio: s.hora_inicio,
+              hora_fin: s.hora_fin,
+              minutos: s.minutos,
+              orden_id: head?.orden_id ?? null,
+              cotizacion_id: head?.cotizacion_id ?? null,
+              numero_orden: esTentativa
+                ? `COT-#${head?.cotizacion_id}`
+                : (head?.ordenes_servicio?.numero_orden || `#${head?.orden_id}`),
+              cliente: esTentativa
+                ? 'Cotización sin aprobar'
+                : (head?.ordenes_servicio?.clientes ? `${head.ordenes_servicio.clientes.nombres} ${head.ordenes_servicio.clientes.apellidos}` : 'Interna'),
+              prioridad: head?.ordenes_servicio?.prioridad ?? 2,
+              estado_orden: head?.ordenes_servicio?.estado || '',
+              estado_prog: head?.estado || '',
+              esTentativa
+            } as SlotView
+          }
+        })
+        .filter((x: any) => x.incluir && x.slot.estado_prog !== 'cancelada')
+        .map((x: any) => x.slot)
       setSlots(planos)
       const { data: ord } = await supabase
         .from('ordenes_servicio')
         .select('id, numero_orden, estado, prioridad, clientes(nombres, apellidos)')
         .in('estado', ['Pendiente', 'En Proceso'])
-      const { data: prog } = await supabase.from('programacion_ordenes').select('orden_id')
+      const { data: prog } = await supabase.from('programacion_ordenes').select('orden_id').not('orden_id', 'is', null)
       const programadas = new Set((prog || []).map((p: any) => p.orden_id))
       setSinProgramar(
         (ord || [])
@@ -127,6 +152,7 @@ export default function Programacion() {
   }
 
   async function handleReprogramar(s: SlotView) {
+    if (!s.orden_id) return
     setAccionLoading(true)
     const r = await reprogramarOrden(s.orden_id, 'Reprogramación desde Gantt')
     setAccionLoading(false)
@@ -137,12 +163,24 @@ export default function Programacion() {
   }
 
   async function handleLiberar(s: SlotView) {
+    if (!s.orden_id) return
     if (!confirm(`¿Liberar la programación de ${s.numero_orden}? La orden quedará sin programar.`)) return
     setAccionLoading(true)
     await liberarProgramacion(s.orden_id, 'Liberada desde Gantt')
     setAccionLoading(false)
     setModalSlot(null)
     toast.success('Programación liberada')
+    fetchAll(); fetchCarga()
+  }
+
+  async function handleLiberarTentativa(s: SlotView) {
+    if (!s.cotizacion_id) return
+    if (!confirm(`¿Liberar la reserva de capacidad de ${s.numero_orden}? La cotización seguirá Pendiente pero sin capacidad apartada.`)) return
+    setAccionLoading(true)
+    await liberarCotizacion(s.cotizacion_id, 'Liberada desde Gantt')
+    setAccionLoading(false)
+    setModalSlot(null)
+    toast.success('Reserva tentativa liberada')
     fetchAll(); fetchCarga()
   }
 
@@ -155,6 +193,7 @@ export default function Programacion() {
     return cal.ausencias.find(a => a.mecanico_id === mecId && f >= a.fecha_inicio && f <= a.fecha_fin) || null
   }
   function colorSlot(s: SlotView): string {
+    if (s.esTentativa) return 'bg-amber-50 border-amber-400 border-dashed text-amber-800'
     const base = s.prioridad === 1
       ? 'bg-purple-100 border-purple-400 text-purple-800'
       : s.prioridad === 4
@@ -228,6 +267,7 @@ export default function Programacion() {
             <div className="text-xs mt-1 opacity-90">{fmtH(totalComp)} de {fmtH(totalDisp)} {pctTaller > 90 ? '— ¡Sobrecarga! Considera subcontratar' : ''}</div>
           </div>
         </div>
+        <p className="text-xs text-slate-500 mt-3">La carga incluye reservas tentativas de cotizaciones sin aprobar (vigentes según la validez configurada).</p>
       </div>
 
       {/* Órdenes sin programar */}
@@ -309,6 +349,7 @@ export default function Programacion() {
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-blue-200 border border-blue-400" /> Cliente normal</span>
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-purple-200 border border-purple-400" /> VIP / Urgente</span>
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-200 border border-green-400" /> Interna</span>
+          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-amber-50 border border-dashed border-amber-400" /> Cotización sin aprobar</span>
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded opacity-50 bg-blue-200 border border-blue-400" /> Completada</span>
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded border border-red-300" style={{ backgroundImage: 'repeating-linear-gradient(45deg,#fee2e2,#fee2e2 3px,#fff 3px,#fff 6px)' }} /> Ausencia</span>
         </div>
@@ -319,23 +360,38 @@ export default function Programacion() {
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-xl max-w-md w-full">
             <div className="p-6 border-b border-slate-200 flex justify-between items-center">
-              <h3 className="text-lg font-semibold text-slate-800">Slot programado</h3>
+              <h3 className="text-lg font-semibold text-slate-800">{modalSlot.esTentativa ? 'Reserva tentativa (cotización)' : 'Slot programado'}</h3>
               <button onClick={() => setModalSlot(null)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-6 space-y-2 text-sm text-slate-700">
-              <div><span className="font-medium">Orden:</span> {modalSlot.numero_orden}</div>
+              <div><span className="font-medium">{modalSlot.esTentativa ? 'Cotización:' : 'Orden:'}</span> {modalSlot.numero_orden}</div>
               <div><span className="font-medium">Cliente:</span> {modalSlot.cliente}</div>
               <div><span className="font-medium">Fecha:</span> {modalSlot.fecha} ({nombreDia(modalSlot.fecha)})</div>
               <div><span className="font-medium">Horario:</span> {fmtHora(modalSlot.hora_inicio)} – {fmtHora(modalSlot.hora_fin)} ({modalSlot.minutos} min)</div>
-              <div><span className="font-medium">Estado orden:</span> {modalSlot.estado_orden}</div>
+              {!modalSlot.esTentativa && (
+                <div><span className="font-medium">Estado orden:</span> {modalSlot.estado_orden}</div>
+              )}
+              {modalSlot.esTentativa && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                  Reserva de capacidad de una cotización sin aprobar. Se convierte en programación firme al aprobar la cotización; vence automáticamente según los días de validez configurados.
+                </p>
+              )}
             </div>
             <div className="p-6 border-t border-slate-200 flex justify-end gap-2">
-              <button onClick={() => handleLiberar(modalSlot)} disabled={accionLoading} className="px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg flex items-center gap-2 disabled:opacity-50">
-                <Trash2 className="w-4 h-4" /> Liberar
-              </button>
-              <button onClick={() => handleReprogramar(modalSlot)} disabled={accionLoading} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 disabled:opacity-50">
-                <RefreshCw className="w-4 h-4" /> Reprogramar
-              </button>
+              {modalSlot.esTentativa ? (
+                <button onClick={() => handleLiberarTentativa(modalSlot)} disabled={accionLoading} className="px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg flex items-center gap-2 disabled:opacity-50">
+                  <Trash2 className="w-4 h-4" /> Liberar reserva
+                </button>
+              ) : (
+                <>
+                  <button onClick={() => handleLiberar(modalSlot)} disabled={accionLoading} className="px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg flex items-center gap-2 disabled:opacity-50">
+                    <Trash2 className="w-4 h-4" /> Liberar
+                  </button>
+                  <button onClick={() => handleReprogramar(modalSlot)} disabled={accionLoading} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 disabled:opacity-50">
+                    <RefreshCw className="w-4 h-4" /> Reprogramar
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

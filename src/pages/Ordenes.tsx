@@ -35,6 +35,7 @@ interface OrdenServicio {
   fecha_registro: string
   tipo_orden?: string
   bicicleta_adquirida_id?: number
+  descripcion_interna?: string | null
 }
 
 interface Servicio {
@@ -102,7 +103,7 @@ export default function Ordenes() {
     costo_estimado: '', costo_real: '', fecha_ingreso: '',
     fecha_entrega_estimada: '', fecha_entrega_real: '', notas: '',
     sintomas_cliente: '', trabajos_cotizados: '', cotizacion_id: '',
-    bicicleta_adquirida_id: ''
+    bicicleta_adquirida_id: '', descripcion_interna: ''
   })
 
   useEffect(() => {
@@ -113,7 +114,7 @@ export default function Ordenes() {
     fetchOrdenes()
   }, [paginaActual, registrosPorPagina, searchTerm, ordenesIndex])
 
-  // ✅ FCS: asistente de promesa en vivo (recalcula al cambiar servicios/modo/cliente)
+  // ✅ FCS: asistente de promesa en vivo
   useEffect(() => {
     if (!showForm) { setPromesaPreview(null); return }
     const t = setTimeout(async () => {
@@ -186,13 +187,7 @@ export default function Ordenes() {
       const to = from + registrosPorPagina - 1
       let query = supabase
         .from('ordenes_servicio')
-        .select(`
-          *, 
-          clientes(nombres, apellidos), 
-          bicicletas(marca, modelo, numero_serie, cliente_id, foto_principal_url), 
-          bicicletas_adquiridas(codigo_inventario, marca, modelo, foto_url),
-          mecanicos(nombres, apellidos)
-        `)
+        .select(`*, clientes(nombres, apellidos), bicicletas(marca, modelo, numero_serie, cliente_id, foto_principal_url), bicicletas_adquiridas(codigo_inventario, marca, modelo, foto_url), mecanicos(nombres, apellidos)`)
         .neq('tipo_orden', 'interna_bicicleta_usada')
         .order('fecha_ingreso', { ascending: false })
         .range(from, to)
@@ -206,7 +201,7 @@ export default function Ordenes() {
           ? `${o.bicicletas.marca || ''} ${o.bicicletas.modelo || ''}`.trim()
           : (o.bicicletas_adquiridas
             ? `${o.bicicletas_adquiridas.marca || ''} ${o.bicicletas_adquiridas.modelo || ''}`.trim()
-            : 'Sin bicicleta')
+            : (o.descripcion_interna || 'Sin bicicleta'))
         return {
           ...o,
           cliente_nombre: o.clientes ? `${o.clientes.nombres} ${o.clientes.apellidos}` : 'Sin cliente',
@@ -307,6 +302,11 @@ export default function Ordenes() {
       toast.error('Una orden en estado Completada debe tener mecánico asignado. Selecciona el mecánico antes de guardar.')
       return
     }
+    // ✅ orden interna sin bicicleta exige descripción del objeto/trabajo
+    if (modoOrden === 'interna' && !formData.bicicleta_adquirida_id && !formData.descripcion_interna.trim()) {
+      toast.error('Describe el objeto o trabajo (ej. rueda delantera 26") o selecciona una bicicleta del inventario.')
+      return
+    }
     try {
       const data = {
         cliente_id: modoOrden === 'cliente' ? (formData.cliente_id || null) : null,
@@ -326,6 +326,7 @@ export default function Ordenes() {
         cotizacion_id: formData.cotizacion_id ? parseInt(formData.cotizacion_id) : null,
         tipo_orden: modoOrden === 'interna' ? 'interna_bicicleta_usada' : 'cliente',
         bicicleta_adquirida_id: modoOrden === 'interna' ? (formData.bicicleta_adquirida_id ? parseInt(formData.bicicleta_adquirida_id) : null) : null,
+        descripcion_interna: modoOrden === 'interna' ? (formData.descripcion_interna.trim() || null) : null,
         precios_a_costo: modoOrden === 'interna',
         numero_orden: modoOrden === 'interna' ? '' : formData.numero_orden
       }
@@ -378,6 +379,7 @@ export default function Ordenes() {
           }
         }
       }
+      // Solo cambia estado de la bicicleta si realmente hay bicicleta asociada
       if (modoOrden === 'interna' && !editingId && formData.bicicleta_adquirida_id) {
         await supabase.from('bicicletas_adquiridas').update({ estado: 'en_reparacion' }).eq('id', parseInt(formData.bicicleta_adquirida_id))
         fetchBicicletasUsadas()
@@ -423,7 +425,8 @@ export default function Ordenes() {
       sintomas_cliente: o.sintomas_cliente || '',
       trabajos_cotizados: o.trabajos_cotizados || '',
       cotizacion_id: o.cotizacion_id?.toString() || '',
-      bicicleta_adquirida_id: o.bicicleta_adquirida_id?.toString() || ''
+      bicicleta_adquirida_id: o.bicicleta_adquirida_id?.toString() || '',
+      descripcion_interna: o.descripcion_interna || ''
     })
     setEditingId(o.id); setShowForm(true); await fetchDetalleOrden(o.id)
     setTimeout(() => {
@@ -441,7 +444,6 @@ export default function Ordenes() {
       }
       const { error } = await supabase.from('ordenes_servicio').update({ estado: 'Cancelada' }).eq('id', id)
       if (error) throw error
-      // ✅ FCS: liberar slots programados
       await liberarProgramacion(id, 'Orden cancelada')
       toast.success(`Orden ${numeroOrden} cancelada y reservas liberadas`)
       fetchOrdenes(); fetchInventario(); fetchOrdenesIndex()
@@ -450,7 +452,6 @@ export default function Ordenes() {
     }
   }
 
-  // ✅ FCS: reprogramación manual desde la tabla
   async function handleReprogramar(o: OrdenServicio) {
     if (!confirm(`¿Reprogramar la orden ${o.numero_orden}?\n\nEl motor recalculará mecánico y fecha de entrega según la capacidad actual.`)) return
     const r = await reprogramarOrden(o.id, 'Reprogramación manual desde tabla')
@@ -540,9 +541,9 @@ export default function Ordenes() {
         estado: 'Completada', fecha_entrega_real: hoyLocal(), costo_real: costoRealCalculado
       }).eq('id', completionOrdenId)
       if (errorOrden) throw errorOrden
-      // ✅ FCS: marcar programación como completada
       await supabase.from('programacion_ordenes').update({ estado: 'completada' }).eq('orden_id', completionOrdenId)
       const ordenActual = ordenes.find(o => o.id === completionOrdenId)
+      // ✅ Solo libera la bicicleta si la orden tenía bicicleta asociada
       if (ordenActual?.tipo_orden === 'interna_bicicleta_usada' && ordenActual.bicicleta_adquirida_id) {
         await supabase.from('bicicletas_adquiridas').update({ estado: 'disponible_venta' }).eq('id', ordenActual.bicicleta_adquirida_id)
         fetchBicicletasUsadas()
@@ -564,7 +565,7 @@ export default function Ordenes() {
       costo_estimado: '', costo_real: '', fecha_ingreso: '',
       fecha_entrega_estimada: '', fecha_entrega_real: '', notas: '',
       sintomas_cliente: '', trabajos_cotizados: '', cotizacion_id: '',
-      bicicleta_adquirida_id: ''
+      bicicleta_adquirida_id: '', descripcion_interna: ''
     })
     setEditingId(null); setShowForm(false); setModoOrden('cliente')
     setDetalleServicios([]); setDetalleRepuestos([])
@@ -582,7 +583,13 @@ export default function Ordenes() {
     }
   }
 
-  const formatDate = (d: string) => d ? new Date(d).toLocaleDateString('es-CO') : '-'
+  // ✅ CORREGIDO: fecha local-segura (fecha pura por slice; timestamp completo sí convierte)
+  const formatDate = (d: string) => {
+    if (!d) return '-'
+    const s = String(d)
+    if (s.length <= 10) return `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}`
+    return new Date(s).toLocaleDateString('es-CO')
+  }
   const formatCurrency = (v: number | null | undefined) => {
     if (v === null || v === undefined) return '$0.00'
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v)
@@ -639,9 +646,9 @@ export default function Ordenes() {
                 </>
               ) : (
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Bicicleta Adquirida (Inventario) *</label>
-                  <select value={formData.bicicleta_adquirida_id} onChange={(e) => setFormData({...formData, bicicleta_adquirida_id: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none" required>
-                    <option value="">Seleccionar bicicleta del inventario...</option>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Bicicleta Adquirida (Inventario) — opcional</label>
+                  <select value={formData.bicicleta_adquirida_id} onChange={(e) => setFormData({...formData, bicicleta_adquirida_id: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none">
+                    <option value="">Sin bicicleta asociada (ej. rueda, cuadro, accesorio)</option>
                     {bicicletasUsadas.map(b => <option key={b.id} value={b.id}>{b.codigo_inventario} - {b.marca} {b.modelo}</option>)}
                   </select>
                 </div>
@@ -663,6 +670,21 @@ export default function Ordenes() {
                 </select>
               </div>
               <div><label className="block text-sm font-medium text-slate-700 mb-1">Fecha Ingreso *</label><input type="date" value={formData.fecha_ingreso} onChange={(e) => setFormData({...formData, fecha_ingreso: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" required /></div>
+              {modoOrden === 'interna' && (
+                <div className="md:col-span-3">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Objeto / descripción del trabajo {!formData.bicicleta_adquirida_id && <span className="text-red-500">*</span>}
+                  </label>
+                  <textarea
+                    value={formData.descripcion_interna}
+                    onChange={(e) => setFormData({...formData, descripcion_interna: e.target.value})}
+                    rows={2}
+                    placeholder='Ej.: Rueda delantera 26" - centrado y cambio de rayos; cuadro talla M para pintura...'
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">Obligatorio si la orden no está asociada a una bicicleta del inventario.</p>
+                </div>
+              )}
             </div>
             <div className="border-t border-slate-200 pt-4">
               <h3 className="text-sm font-semibold text-slate-700 mb-3">Detalles Técnicos</h3>
@@ -876,6 +898,7 @@ export default function Ordenes() {
           campos={[
             { label: 'Foto Bicicleta', value: modalDetalle.bicicleta_foto, tipo: 'imagen' },
             { label: 'Tipo de Orden', value: modalDetalle.tipo_orden === 'interna_bicicleta_usada' ? 'Interna (Bicicleta Usada)' : 'Cliente (Taller)', tipo: 'estado' },
+            { label: 'Objeto / Trabajo (interna)', value: modalDetalle.descripcion_interna || '-', tipo: 'texto' },
             { label: 'Cliente', value: modalDetalle.cliente_nombre },
             { label: 'Bicicleta', value: modalDetalle.bicicleta_info },
             { label: 'Mecánico', value: modalDetalle.mecanico_nombre },

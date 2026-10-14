@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { hoyLocal } from '../utils/fechas'
 import { supabase } from '../lib/supabase'
-import { Plus, Edit, Trash2, Save, X, Search, Eye, CheckCircle, Wrench, Package, Camera, Lock, FileDown } from 'lucide-react'
+import { Plus, Edit, Trash2, Save, X, Search, Eye, CheckCircle, Wrench, Package, Camera, Lock, FileDown, Clock, AlertTriangle, Ban } from 'lucide-react'
 import toast from 'react-hot-toast'
 import ModalDetalle from '../components/ModalDetalle'
 import ControlesPaginacion from '../components/ControlesPaginacion'
+import { previewPromesa, programarCotizacion, liberarCotizacion, confirmarCotizacion, programarOrden } from '../utils/scheduler'
+import type { ResultadoProgramacion } from '../utils/scheduler'
 
 interface Cotizacion {
   id: number
@@ -19,7 +21,6 @@ interface Cotizacion {
   notas: string
   fecha_registro: string
 }
-
 interface Solicitud {
   id: number
   cliente_nombre: string
@@ -27,13 +28,14 @@ interface Solicitud {
   fue_cotizada: boolean
   estado: string
 }
-
 interface Servicio {
   id: number
   nombre: string
   precio_cliente: number
+  tiempo_preparacion_min: number
+  tiempo_ejecucion_min: number
+  tiempo_limpieza_min: number
 }
-
 interface ItemInventario {
   id: number
   nombre: string
@@ -41,7 +43,6 @@ interface ItemInventario {
   stock_reservado: number
   precio_venta: number
 }
-
 interface DetalleItem {
   id: string
   tipo: 'servicio' | 'repuesto'
@@ -68,8 +69,10 @@ export default function Cotizaciones() {
   const [registrosPorPagina, setRegistrosPorPagina] = useState(25)
   const [totalRegistros, setTotalRegistros] = useState(0)
   const [generandoPDF, setGenerandoPDF] = useState(false)
+  const [guardando, setGuardando] = useState(false)
+  const [promesaPreview, setPromesaPreview] = useState<ResultadoProgramacion | null>(null)
+  const [calculandoPromesa, setCalculandoPromesa] = useState(false)
   const contenidoRef = useRef<HTMLDivElement>(null)
-  // ✅ NUEVO: referencia al formulario para desplazar la vista al editar (móvil)
   const formRef = useRef<HTMLDivElement>(null)
   const [formData, setFormData] = useState({
     solicitud_id: '', fecha_cotizacion: '', fecha_entrega_estimada: '', notas: ''
@@ -89,6 +92,20 @@ export default function Cotizaciones() {
     fetchCotizaciones()
   }, [paginaActual, registrosPorPagina, searchTerm])
 
+  // ✅ FCS: promesa en vivo; al editar excluye la reserva previa de ESTA cotización
+  useEffect(() => {
+    if (!showForm) { setPromesaPreview(null); return }
+    const t = setTimeout(async () => {
+      const lineas = detalleServicios.filter(s => s.servicio_id).map(s => ({ servicio_id: s.servicio_id as number, cantidad: s.cantidad }))
+      if (lineas.length === 0) { setPromesaPreview(null); return }
+      setCalculandoPromesa(true)
+      const r = await previewPromesa(lineas, 2, servicios, editingId ?? undefined)
+      setPromesaPreview(r)
+      setCalculandoPromesa(false)
+    }, 400)
+    return () => clearTimeout(t)
+  }, [detalleServicios, showForm, servicios, editingId])
+
   async function fetchCotizaciones() {
     try {
       setLoading(true)
@@ -107,12 +124,7 @@ export default function Cotizaciones() {
       const to = from + registrosPorPagina - 1
       let query = supabase
         .from('cotizaciones')
-        .select(`*, solicitudes_servicio (
-          cliente_id,
-          bicicleta_id,
-          clientes (nombres, apellidos),
-          bicicletas (marca, modelo, foto_principal_url)
-        )`)
+        .select(`*, solicitudes_servicio ( cliente_id, bicicleta_id, clientes (nombres, apellidos), bicicletas (marca, modelo, foto_principal_url) )`)
         .order('fecha_cotizacion', { ascending: false })
         .range(from, to)
       if (searchTerm) {
@@ -174,7 +186,7 @@ export default function Cotizaciones() {
   async function fetchServicios() {
     const { data } = await supabase
       .from('servicios')
-      .select('id, nombre, precio_cliente')
+      .select('id, nombre, precio_cliente, tiempo_preparacion_min, tiempo_ejecucion_min, tiempo_limpieza_min')
       .eq('activo', true)
       .order('nombre')
     setServicios(data || [])
@@ -196,7 +208,7 @@ export default function Cotizaciones() {
         .select('*')
         .eq('cotizacion_id', cotizacionId)
       if (error) throw error
-      const servicios = (data || [])
+      const serviciosDet = (data || [])
         .filter((d: any) => d.tipo === 'servicio')
         .map((d: any) => ({
           id: d.id.toString(),
@@ -220,7 +232,7 @@ export default function Cotizaciones() {
           precio_unitario: d.precio_unitario,
           subtotal: d.subtotal
         }))
-      setDetalleServicios(servicios)
+      setDetalleServicios(serviciosDet)
       setDetalleRepuestos(repuestos)
     } catch (error: any) {
       console.error('Error cargando detalle:', error)
@@ -263,6 +275,23 @@ export default function Cotizaciones() {
   const totalRepuestos = detalleRepuestos.reduce((sum, i) => sum + i.subtotal, 0)
   const granTotal = totalServicios + totalRepuestos
 
+  // ✅ CORREGIDO: formato local-seguro.
+  // Fecha pura 'YYYY-MM-DD' ya es día de calendario local → se muestra por slice (sin new Date, sin UTC).
+  // Timestamp completo (con hora, UTC) sí se convierte a local.
+  function formatDate(d: string): string {
+    if (!d) return '-'
+    const s = String(d)
+    if (s.length <= 10) return `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}`
+    return new Date(s).toLocaleDateString('es-CO')
+  }
+
+  // ✅ Formato de fecha sin riesgo de zona horaria (YYYY-MM-DD → DD/MM/YYYY)
+  function fmtFechaPDF(f: string | null): string {
+    if (!f) return ''
+    const d = f.slice(0, 10)
+    return `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`
+  }
+
   async function generarPDFCotizacionIndividual(cotizacionId: number) {
     try {
       const { data: cotData } = await supabase
@@ -276,6 +305,25 @@ export default function Cotizaciones() {
         .select('*')
         .eq('cotizacion_id', cotizacionId)
       if (!detalleData) return
+      // ✅ Hora de entrega real tomada de la programación (tentativa o convertida)
+      let horaPromesa = ''
+      const { data: progHead } = await supabase
+        .from('programacion_ordenes')
+        .select('id, estado')
+        .eq('cotizacion_id', cotizacionId)
+        .in('estado', ['tentativa', 'pendiente', 'confirmada', 'en_ejecucion', 'reprogramada'])
+        .order('id', { ascending: false })
+        .limit(1)
+      if (progHead && progHead.length > 0) {
+        const { data: lastSlot } = await supabase
+          .from('programacion_slots')
+          .select('fecha, hora_fin')
+          .eq('programacion_id', progHead[0].id)
+          .order('fecha', { ascending: false })
+          .order('hora_fin', { ascending: false })
+          .limit(1)
+        if (lastSlot && lastSlot.length > 0) horaPromesa = ` ${lastSlot[0].hora_fin.slice(0, 5)}`
+      }
       const serviciosDet = detalleData.filter((d: any) => d.tipo === 'servicio')
       const repuestosDet = detalleData.filter((d: any) => d.tipo === 'repuesto')
       const { default: jsPDF } = await import('jspdf')
@@ -300,9 +348,9 @@ export default function Cotizaciones() {
       doc.setTextColor(50, 50, 50)
       doc.text(`Cliente: ${clienteNombre}`, 14, 42)
       doc.text(`Bicicleta: ${bicicletaInfo}`, 14, 48)
-      doc.text(`Fecha: ${new Date(cotData.fecha_cotizacion).toLocaleDateString('es-CO')}`, 14, 54)
+      doc.text(`Fecha: ${fmtFechaPDF(cotData.fecha_cotizacion)}`, 14, 54)
       if (cotData.fecha_entrega_estimada) {
-        doc.text(`Entrega estimada: ${new Date(cotData.fecha_entrega_estimada).toLocaleDateString('es-CO')}`, 14, 60)
+        doc.text(`Entrega estimada: ${fmtFechaPDF(cotData.fecha_entrega_estimada)}${horaPromesa}`, 14, 60)
       }
       let startY = 70
       if (serviciosDet.length > 0) {
@@ -387,6 +435,9 @@ export default function Cotizaciones() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    // ✅ Guarda anti-doble-clic: evita reservas tentativas duplicadas
+    if (guardando) return
+    setGuardando(true)
     try {
       const data = {
         solicitud_id: formData.solicitud_id ? parseInt(formData.solicitud_id) : null,
@@ -417,6 +468,21 @@ export default function Cotizaciones() {
           descripcion: r.nombre, cantidad: r.cantidad, precio_unitario: r.precio_unitario, subtotal: r.subtotal
         })))
       }
+      // ✅ FCS: reserva tentativa única y sin auto-esquiva
+      if (cotizacionId) {
+        const lineas = detalleServicios.filter(s => s.servicio_id).map(s => ({ servicio_id: s.servicio_id as number, cantidad: s.cantidad }))
+        if (lineas.length > 0) {
+          const r = await programarCotizacion(cotizacionId, lineas, servicios)
+          if (r.ok) {
+            await supabase.from('cotizaciones').update({ fecha_entrega_estimada: r.fechaPrometida }).eq('id', cotizacionId)
+            toast.success(`Capacidad reservada: entrega tentativa ${r.fechaPrometida} con ${r.mecanicoNombre}`)
+          } else {
+            toast.error(r.error || 'No se pudo reservar capacidad')
+          }
+        } else {
+          await liberarCotizacion(cotizacionId, 'Cotización sin servicios')
+        }
+      }
       if (cotizacionId) {
         toast.success('Generando PDF automáticamente...')
         await generarPDFCotizacionIndividual(cotizacionId)
@@ -428,6 +494,8 @@ export default function Cotizaciones() {
       }
     } catch (error: any) {
       toast.error('Error: ' + error.message)
+    } finally {
+      setGuardando(false)
     }
   }
 
@@ -504,14 +572,37 @@ export default function Cotizaciones() {
           if (errorMovimiento) throw errorMovimiento
         }
       }
-      toast.success(`✅ Cotización aprobada. Orden ${nuevoNumeroOrden} creada con detalle copiado`)
+      // ✅ FCS: convertir reserva tentativa en programación dura (o reprogramar si hubo conflicto)
+      let msgPromesa = ''
+      const conf = await confirmarCotizacion(cotizacion.id, ordenId)
+      if (conf.ok) {
+        msgPromesa = ` Entrega prometida: ${formatDate(conf.fechaPrometida!)} con ${conf.mecanicoNombre}.`
+      } else {
+        const r = await programarOrden(ordenId)
+        if (r.ok) msgPromesa = ` Entrega prometida: ${formatDate(r.fechaPrometida!)} con ${r.mecanicoNombre}.`
+        else msgPromesa = ` ${r.error || ''}`
+      }
+      toast.success(`✅ Cotización aprobada. Orden ${nuevoNumeroOrden} creada con detalle copiado.${msgPromesa}`)
       fetchCotizaciones(); fetchSolicitudesDisponibles(); fetchInventario()
     } catch (error: any) {
       toast.error('Error al aprobar: ' + error.message)
     }
   }
 
-  // ✅ CORREGIDO: al editar, desplaza la vista hasta el formulario (crítico en móvil)
+  // ✅ FCS: rechazar libera la capacidad reservada
+  async function handleRechazarCotizacion(c: Cotizacion) {
+    if (!confirm(`¿Rechazar cotización #${c.id}?\n\nSe liberará la capacidad reservada para otras órdenes.`)) return
+    try {
+      const { error } = await supabase.from('cotizaciones').update({ estado: 'Rechazada' }).eq('id', c.id)
+      if (error) throw error
+      await liberarCotizacion(c.id, 'Cotización rechazada')
+      toast.success(`Cotización #${c.id} rechazada y capacidad liberada`)
+      fetchCotizaciones(); fetchSolicitudesDisponibles()
+    } catch (error: any) {
+      toast.error('Error al rechazar: ' + error.message)
+    }
+  }
+
   function handleEdit(c: Cotizacion) {
     if (c.estado === 'Aprobada') {
       toast.error('No se puede modificar una cotización ya aprobada')
@@ -532,6 +623,7 @@ export default function Cotizaciones() {
   async function handleDelete(id: number) {
     if (!confirm('¿Eliminar esta cotización?')) return
     try {
+      await liberarCotizacion(id, 'Cotización eliminada')
       await supabase.from('detalle_cotizaciones').delete().eq('cotizacion_id', id)
       const { error } = await supabase.from('cotizaciones').delete().eq('id', id)
       if (error) throw error
@@ -547,6 +639,7 @@ export default function Cotizaciones() {
     setEditingId(null); setShowForm(false)
     setDetalleServicios([]); setDetalleRepuestos([])
     setNuevoServicio({ servicio_id: '', cantidad: '1' }); setNuevoRepuesto({ item_id: '', cantidad: '1' })
+    setPromesaPreview(null)
   }
 
   async function handleGenerarPDF() {
@@ -603,8 +696,6 @@ export default function Cotizaciones() {
     }
   }
 
-  const formatDate = (d: string) => d ? new Date(d).toLocaleDateString('es-CO') : '-'
-
   const formatCurrency = (v: number | null | undefined) => {
     if (v === null || v === undefined) return '$0.00'
     return new Intl.NumberFormat('en-US', {
@@ -614,6 +705,7 @@ export default function Cotizaciones() {
       maximumFractionDigits: 2
     }).format(v)
   }
+  const fmtMin = (m: number) => `${Math.floor(m / 60)}h ${m % 60}m`
 
   function tablaDetalle(items: DetalleItem[], onEliminar: (id: string) => void, c: { bg: string; head: string; row: string; foot: string }, total: number) {
     return (
@@ -713,6 +805,23 @@ export default function Cotizaciones() {
                 <div className="flex items-end"><button type="button" onClick={agregarServicio} className="w-full px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 flex items-center justify-center gap-2 text-sm"><Plus className="w-4 h-4" /> Agregar</button></div>
               </div>
               {detalleServicios.length > 0 && tablaDetalle(detalleServicios, eliminarServicio, { bg: 'bg-blue-50', head: 'border-b border-blue-200', row: 'border-b border-blue-100 last:border-0', foot: 'border-t border-blue-300' }, totalServicios)}
+              {/* ✅ FCS: promesa de entrega en vivo */}
+              {(calculandoPromesa || promesaPreview) && (
+                <div className={`mt-3 rounded-lg p-3 text-sm ${promesaPreview?.ok ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'}`}>
+                  {calculandoPromesa ? (
+                    <span className="text-slate-600">Calculando promesa de entrega…</span>
+                  ) : promesaPreview?.ok ? (
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-green-800">
+                      <span className="font-semibold flex items-center gap-1"><Clock className="w-4 h-4" /> Promesa de entrega: {formatDate(promesaPreview.fechaPrometida!)}</span>
+                      <span>Mecánico sugerido: {promesaPreview.mecanicoNombre}</span>
+                      <span>Duración: {fmtMin(promesaPreview.minutosTotales || 0)}</span>
+                      <span className="text-xs text-green-700">(se reserva al guardar; considera cotizaciones previas sin aprobar)</span>
+                    </div>
+                  ) : (
+                    <span className="text-amber-800 flex items-center gap-1"><AlertTriangle className="w-4 h-4" /> {promesaPreview?.error}</span>
+                  )}
+                </div>
+              )}
             </div>
             <div className="border-t border-slate-200 pt-4">
               <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2"><Package className="w-4 h-4" /> Repuestos y Materiales</h3>
@@ -738,7 +847,9 @@ export default function Cotizaciones() {
             </div>
             <div className="flex gap-2 justify-end pt-2">
               <button type="button" onClick={resetForm} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
-              <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"><Save className="w-4 h-4" /> {editingId ? 'Actualizar' : 'Guardar Cotización'}</button>
+              <button type="submit" disabled={guardando} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                {guardando ? (<><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Guardando...</>) : (<><Save className="w-4 h-4" /> {editingId ? 'Actualizar' : 'Guardar Cotización'}</>)}
+              </button>
             </div>
           </form>
         </div>
@@ -790,6 +901,9 @@ export default function Cotizaciones() {
                               <button onClick={() => setModalDetalle(c)} className="p-2 text-slate-600 hover:bg-slate-100 rounded" title="Ver detalle"><Eye className="w-4 h-4" /></button>
                               {c.estado !== 'Aprobada' && (
                                 <button onClick={() => handleAprobarCotizacion(c)} className="p-2 text-green-600 hover:bg-green-50 rounded" title="Aprobar y generar orden"><CheckCircle className="w-4 h-4" /></button>
+                              )}
+                              {c.estado === 'Pendiente' && (
+                                <button onClick={() => handleRechazarCotizacion(c)} className="p-2 text-orange-600 hover:bg-orange-50 rounded" title="Rechazar y liberar capacidad"><Ban className="w-4 h-4" /></button>
                               )}
                               {c.estado !== 'Aprobada' ? (
                                 <button onClick={() => handleEdit(c)} className="p-2 text-blue-600 hover:bg-blue-50 rounded" title="Editar"><Edit className="w-4 h-4" /></button>

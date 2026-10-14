@@ -15,8 +15,7 @@ interface ModalDetalleProps {
 export default function ModalDetalle({ titulo, campos, onClose }: ModalDetalleProps) {
   const formatearValor = (campo: Campo) => {
     if (campo.value === null || campo.value === undefined || campo.value === '') return '-'
-
-    // NUEVO: Soporte para imágenes
+    // Soporte para imágenes
     if (campo.tipo === 'imagen' && typeof campo.value === 'string') {
       return (
         <div className="space-y-2">
@@ -32,12 +31,16 @@ export default function ModalDetalle({ titulo, campos, onClose }: ModalDetallePr
         </div>
       )
     }
-
     if (campo.tipo === 'moneda' && typeof campo.value === 'number') {
       return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP' }).format(campo.value)
     }
+    // ✅ CORREGIDO: fecha local-segura.
+    // Fecha pura 'YYYY-MM-DD' ya es día de calendario local → slice (sin new Date, sin UTC).
+    // Timestamp completo (con hora, UTC) sí se convierte a local.
     if (campo.tipo === 'fecha' && typeof campo.value === 'string') {
-      return new Date(campo.value).toLocaleDateString('es-CO')
+      const s = String(campo.value)
+      if (s.length <= 10) return `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}`
+      return new Date(s).toLocaleDateString('es-CO')
     }
     if (campo.tipo === 'estado') {
       const colores: Record<string, string> = {
@@ -86,9 +89,7 @@ export default function ModalDetalle({ titulo, campos, onClose }: ModalDetallePr
                 <label className="block text-xs font-medium text-slate-500 uppercase tracking-wide mb-1">
                   {campo.label}
                 </label>
-                <div className={`text-sm text-slate-900 bg-slate-50 p-2 rounded border border-slate-200 min-h-[36px] ${
-                  campo.tipo === 'imagen' ? 'bg-white border-dashed' : ''
-                }`}>
+                <div className={`text-sm text-slate-900 bg-slate-50 p-2 rounded border border-slate-200 min-h-[36px] ${campo.tipo === 'imagen' ? 'bg-white border-dashed' : ''}`}>
                   {formatearValor(campo)}
                 </div>
               </div>

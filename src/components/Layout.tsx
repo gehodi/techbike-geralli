@@ -150,7 +150,7 @@ export default function Layout() {
       </div>
 
       <div className="flex">
-        {/* Menú lateral: en móvil anclado top-16/bottom-0; en escritorio sticky h-screen */}
+        {/* ✅ Menú lateral: en móvil anclado top-16/bottom-0; en escritorio sticky h-screen */}
         <aside className={`
           fixed lg:sticky top-16 lg:top-0 bottom-0 lg:bottom-auto lg:h-screen left-0 w-64 bg-white border-r border-slate-200 z-30
           transform transition-transform duration-300 ease-in-out

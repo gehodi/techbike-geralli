@@ -30,6 +30,7 @@ interface Config {
   umbral_sobrecarga: number
   minutos_verificacion_retorno: number
   auto_sugerir_subcontratacion: boolean
+  dias_validez_promesa: number
 }
 
 const DIAS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
@@ -39,7 +40,7 @@ const TIPOS_AUSENCIA = ['vacaciones', 'permiso', 'incapacidad', 'cita_personal',
 export default function ConfiguracionTaller() {
   const [config, setConfig] = useState<Config>({
     minutos_buffer: 15, horizonte_dias: 30, umbral_sobrecarga: 90,
-    minutos_verificacion_retorno: 30, auto_sugerir_subcontratacion: true
+    minutos_verificacion_retorno: 30, auto_sugerir_subcontratacion: true, dias_validez_promesa: 7
   })
   const [horarios, setHorarios] = useState<HorarioRow[]>([])
   const [dnl, setDnl] = useState<DiaNoLaborable[]>([])
@@ -59,7 +60,8 @@ export default function ConfiguracionTaller() {
     if (cfg) setConfig({
       minutos_buffer: cfg.minutos_buffer, horizonte_dias: cfg.horizonte_dias,
       umbral_sobrecarga: cfg.umbral_sobrecarga, minutos_verificacion_retorno: cfg.minutos_verificacion_retorno,
-      auto_sugerir_subcontratacion: cfg.auto_sugerir_subcontratacion
+      auto_sugerir_subcontratacion: cfg.auto_sugerir_subcontratacion,
+      dias_validez_promesa: cfg.dias_validez_promesa ?? 7
     })
     const { data: hor } = await supabase.from('taller_horarios').select('*').order('dia_semana')
     setHorarios((hor || []).map((h: any) => ({
@@ -85,7 +87,8 @@ export default function ConfiguracionTaller() {
       horizonte_dias: config.horizonte_dias,
       umbral_sobrecarga: config.umbral_sobrecarga,
       minutos_verificacion_retorno: config.minutos_verificacion_retorno,
-      auto_sugerir_subcontratacion: config.auto_sugerir_subcontratacion
+      auto_sugerir_subcontratacion: config.auto_sugerir_subcontratacion,
+      dias_validez_promesa: config.dias_validez_promesa
     }).eq('id', 1)
     setSaving(false)
     if (error) { toast.error('Error: ' + error.message); return }
@@ -194,7 +197,7 @@ export default function ConfiguracionTaller() {
       {/* Parámetros globales */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
         <h3 className="font-semibold text-slate-800 mb-4">Parámetros del planificador</h3>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Buffer entre órdenes (min)</label>
             <input type="number" min="0" value={config.minutos_buffer} onChange={(e) => setConfig({ ...config, minutos_buffer: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
@@ -210,6 +213,12 @@ export default function ConfiguracionTaller() {
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Verificación retorno (min)</label>
             <input type="number" min="0" value={config.minutos_verificacion_retorno} onChange={(e) => setConfig({ ...config, minutos_verificacion_retorno: parseInt(e.target.value) || 0 })} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+          </div>
+          {/* ✅ NUEVO: validez de la promesa en cotizaciones */}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Validez promesa cotización (días)</label>
+            <input type="number" min="1" max="90" value={config.dias_validez_promesa} onChange={(e) => setConfig({ ...config, dias_validez_promesa: parseInt(e.target.value) || 7 })} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+            <p className="text-xs text-slate-500 mt-1">Días que una cotización sin aprobar reserva capacidad antes de vencerse.</p>
           </div>
         </div>
         <label className="flex items-center gap-2 mt-4 text-sm text-slate-700">

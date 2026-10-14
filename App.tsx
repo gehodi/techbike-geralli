@@ -31,6 +31,8 @@ import CertificadoReacondicionamiento from './pages/CertificadoReacondicionamien
 import ComprobanteVenta from './pages/ComprobanteVenta'
 import Programacion from './pages/Programacion'
 import ConfiguracionTaller from './pages/ConfiguracionTaller'
+import Programacion from './pages/Programacion'
+import ConfiguracionTaller from './pages/ConfiguracionTaller'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -88,6 +90,7 @@ function App() {
           <Route path="/ordenes" element={<Ordenes />} />
           <Route path="/ordenes-internas" element={<OrdenesInternas />} />
           <Route path="/programacion" element={<Programacion />} />
+          <Route path="/programacion" element={<Programacion />} />
           <Route path="/orden-completada/:id" element={<DetalleOrdenCompletada />} />
           <Route path="/inventario" element={<Inventario />} />
           <Route path="/requisiciones" element={<Requisiciones />} />
@@ -103,6 +106,7 @@ function App() {
           <Route path="/bicicletas-usadas" element={<BicicletasUsadas />} />
           <Route path="/ventas-bicicletas" element={<VentasBicicletas />} />
           <Route path="/garantias" element={<Garantias />} />
+          <Route path="/configuracion-taller" element={<ConfiguracionTaller />} />
           <Route path="/reclamaciones-garantia" element={<ReclamacionesGarantia />} />
           <Route path="/configuracion-taller" element={<ConfiguracionTaller />} />
         </Route>
