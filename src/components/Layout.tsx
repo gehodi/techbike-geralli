@@ -6,7 +6,8 @@ import { supabase } from '../lib/supabase'
 import {
   LayoutDashboard, Users, Bike, Wrench, FileText, DollarSign,
   ClipboardList, Package, ChevronDown, ChevronRight, LogOut, Menu, X,
-  Tag, Award, Truck, History, Hammer, AlertTriangle, BarChart3, Shield
+  Tag, Award, Truck, History, Hammer, AlertTriangle, BarChart3, Shield,
+  CalendarDays, Settings
 } from 'lucide-react'
 
 interface MenuItem {
@@ -57,12 +58,10 @@ export default function Layout() {
       const stockBajo = (inventario || []).filter((i: any) =>
         (i.stock_actual - (i.stock_reservado || 0)) <= i.stock_minimo
       ).length
-
       const { count: reqPendientes } = await supabase
         .from('requisiciones_inventario')
         .select('*', { count: 'exact', head: true })
         .eq('estado_aprobacion', 'Pendiente')
-
       const hoy = hoyLocal()
       const fechaLimite = new Date()
       fechaLimite.setDate(fechaLimite.getDate() + 15)
@@ -73,7 +72,6 @@ export default function Layout() {
         .eq('estado', 'vigente')
         .gte('fecha_fin', hoy)
         .lte('fecha_fin', fechaLimiteStr)
-
       setBadges({
         stockBajo,
         reqPendientes: reqPendientes || 0,
@@ -91,6 +89,7 @@ export default function Layout() {
     { path: '/cotizaciones', label: 'Cotizaciones', icon: DollarSign },
     { path: '/ordenes', label: 'Órdenes de Servicio', icon: ClipboardList },
     { path: '/ordenes-internas', label: 'Órdenes Internas', icon: Wrench },
+    { path: '/programacion', label: 'Programación', icon: CalendarDays },
     { path: '/bicicletas', label: 'Bicicletas', icon: Bike },
     { path: '/bicicletas-usadas', label: 'Adquisición Bicicletas', icon: Bike },
     { path: '/ventas-bicicletas', label: 'Ventas Bicicletas', icon: DollarSign },
@@ -102,6 +101,7 @@ export default function Layout() {
     { path: '/registro-danos', label: 'Registro de Daños', icon: AlertTriangle },
     { path: '/historial-inventario', label: 'Historial Movimientos', icon: History },
     { path: '/reportes', label: 'Reportes', icon: BarChart3 },
+    { path: '/configuracion-taller', label: 'Config. Taller', icon: Settings },
   ]
 
   const subMenuCatalogos: SubMenu = {
@@ -150,9 +150,7 @@ export default function Layout() {
       </div>
 
       <div className="flex">
-        {/* ✅ CORREGIDO (móvil Chrome/WebView Android): en móvil se ancla con top-16 + bottom-0
-            (sin cálculos de 100vh, que Chrome Android mide de más y cortaba los últimos ítems).
-            En escritorio se mantiene sticky con h-screen. */}
+        {/* Menú lateral: en móvil anclado top-16/bottom-0; en escritorio sticky h-screen */}
         <aside className={`
           fixed lg:sticky top-16 lg:top-0 bottom-0 lg:bottom-auto lg:h-screen left-0 w-64 bg-white border-r border-slate-200 z-30
           transform transition-transform duration-300 ease-in-out
@@ -163,7 +161,6 @@ export default function Layout() {
             <div className="hidden lg:flex items-center justify-between px-6 py-4 border-b border-slate-200">
               <h1 className="text-xl font-bold text-slate-800">Taller Bike</h1>
             </div>
-
             {/* Encabezado del menú en móvil con botón de cierre */}
             <div className="lg:hidden flex items-center justify-between px-4 py-3 border-b border-slate-200">
               <h1 className="text-lg font-bold text-slate-800">Menú</h1>
@@ -174,7 +171,6 @@ export default function Layout() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-
             {/* min-h-0 + overscroll-contain: scroll interno correcto en todos los navegadores */}
             <nav className="flex-1 min-h-0 overflow-y-auto overscroll-contain py-4">
               <div className="px-3 space-y-1">
@@ -210,7 +206,6 @@ export default function Layout() {
                     </Link>
                   )
                 })}
-
                 {/* Submenú Catálogos */}
                 <div className="pt-2">
                   <button
@@ -257,7 +252,6 @@ export default function Layout() {
                 </div>
               </div>
             </nav>
-
             {/* Footer con usuario visible también en móvil */}
             <div className="border-t border-slate-200 p-4">
               <div className="flex items-center justify-between">
