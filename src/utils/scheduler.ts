@@ -2,9 +2,13 @@ import { supabase } from '../lib/supabase'
 import { hoyLocal, fechaLocalISO } from './fechas'
 
 // =====================================================
-// MOTOR DE PROGRAMACIÓN DE CAPACIDAD FINITA (FCS)
-// Reservas duras (órdenes) + tentativas (cotizaciones)
-// ✅ FIX: una cotización nunca se esquiva a sí misma
+// MOTOR FCS — replanificación global determinista.
+// Invariante: cada cambio de capacidad re-planifica TODO el backlog
+// de mejor a peor sobre ocupación acumulada => compactación inherente,
+// sin slots fantasma, mismo input = mismo Gantt.
+// Jerarquía: 1 VIP > 2 Cliente/Cotización > 3 Interna urgente > 4 Interna normal.
+// Inamovibles: órdenes 'En Proceso' (trabajo iniciado) se conservan fijos.
+// Anti-hang: 1 replanificación por operación + lecturas/escrituras EN LOTE.
 // =====================================================
 
 export interface HorarioDia {
@@ -44,13 +48,7 @@ export interface ResultadoProgramacion {
   slots?: SlotCalc[]
   desplazadas?: number[]
 }
-interface Bloque {
-  inicio: number
-  fin: number
-  ordenId?: number
-  cotizacionId?: number
-  desplazable?: boolean
-}
+interface Bloque { inicio: number; fin: number }
 interface Calendario {
   config: ConfigTaller
   horarios: HorarioDia[]
@@ -59,8 +57,20 @@ interface Calendario {
   ausencias: Ausencia[]
 }
 interface Ocupacion { [clave: string]: Bloque[] }
+type Mec = { id: number; nombres: string; apellidos: string }
+interface Item {
+  kind: 'O' | 'C' | 'N'
+  id: number
+  prioridad: number
+  T: number
+  fechaBase: string
+  mecanicoForzado?: number
+  clave: string
+}
+interface Asignacion { mec: Mec; slots: SlotCalc[]; T: number; prometida: string }
 
 const MIN_FRAG = 60
+const CHUNK = 12
 
 // ---------- utilidades de tiempo ----------
 function minDeHora(h: string | null): number | null {
@@ -89,13 +99,22 @@ function hhmm(min: number): string {
   const m = min % 60
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`
 }
+async function chunked<T>(arr: T[], fn: (t: T) => Promise<any>): Promise<void> {
+  for (let i = 0; i < arr.length; i += CHUNK) {
+    await Promise.all(arr.slice(i, i + CHUNK).map(fn))
+  }
+}
 
-// ---------- carga de calendario ----------
+// ---------- calendario ----------
 export async function cargarCalendario(): Promise<Calendario> {
-  const { data: cfg } = await supabase.from('taller_configuracion').select('*').eq('id', 1).single()
-  const { data: hor } = await supabase.from('taller_horarios').select('*')
-  const { data: dnl } = await supabase.from('dias_no_laborables').select('fecha, recurrente_anual')
-  const { data: aus } = await supabase.from('ausencias_mecanico').select('*').eq('aprobada', true).gte('fecha_fin', hoyLocal())
+  const [cfgR, horR, dnlR, ausR] = await Promise.all([
+    supabase.from('taller_configuracion').select('*').eq('id', 1).single(),
+    supabase.from('taller_horarios').select('*'),
+    supabase.from('dias_no_laborables').select('fecha, recurrente_anual'),
+    supabase.from('ausencias_mecanico').select('*').eq('aprobada', true).gte('fecha_fin', hoyLocal())
+  ])
+  const cfg = cfgR.data as any
+  const dnl = (dnlR.data || []) as any[]
   return {
     config: {
       minutos_buffer: cfg?.minutos_buffer ?? 15,
@@ -105,27 +124,25 @@ export async function cargarCalendario(): Promise<Calendario> {
       auto_sugerir_subcontratacion: cfg?.auto_sugerir_subcontratacion ?? true,
       dias_validez_promesa: cfg?.dias_validez_promesa ?? 7
     },
-    horarios: (hor || []) as HorarioDia[],
-    festivos: (dnl || []).filter((d: any) => !d.recurrente_anual).map((d: any) => d.fecha),
-    festivosRecurrentes: (dnl || []).filter((d: any) => d.recurrente_anual).map((d: any) => d.fecha.slice(5)),
-    ausencias: (aus || []) as Ausencia[]
+    horarios: (horR.data || []) as HorarioDia[],
+    festivos: dnl.filter((d) => !d.recurrente_anual).map((d) => d.fecha),
+    festivosRecurrentes: dnl.filter((d) => d.recurrente_anual).map((d) => String(d.fecha).slice(5)),
+    ausencias: (ausR.data || []) as Ausencia[]
   }
 }
-
 function esDiaNoLaborable(cal: Calendario, fecha: string): boolean {
   if (cal.festivos.includes(fecha)) return true
   if (cal.festivosRecurrentes.includes(fecha.slice(5))) return true
-  const h = cal.horarios.find(x => x.dia_semana === dowDe(fecha))
+  const h = cal.horarios.find((x) => x.dia_semana === dowDe(fecha))
   return !h || !h.laborable
 }
-
 function ausenciaDe(cal: Calendario, mecanicoId: number, fecha: string): Ausencia | null {
-  return cal.ausencias.find(a => a.mecanico_id === mecanicoId && fecha >= a.fecha_inicio && fecha <= a.fecha_fin) || null
+  return cal.ausencias.find((a) => a.mecanico_id === mecanicoId && fecha >= a.fecha_inicio && fecha <= a.fecha_fin) || null
 }
 
-// Bloques libres del día para un mecánico
+// ---------- bloques libres / simulación pura ----------
 function bloquesLibres(cal: Calendario, ocup: Ocupacion, mecanicoId: number, fecha: string, minInicio: number): Bloque[] {
-  const h = cal.horarios.find(x => x.dia_semana === dowDe(fecha))
+  const h = cal.horarios.find((x) => x.dia_semana === dowDe(fecha))
   if (!h || !h.laborable) return []
   const open = Math.max(minDeHora(h.hora_apertura) ?? 480, minInicio)
   const close = minDeHora(h.hora_cierre) ?? 1020
@@ -137,7 +154,7 @@ function bloquesLibres(cal: Calendario, ocup: Ocupacion, mecanicoId: number, fec
   const aus = ausenciaDe(cal, mecanicoId, fecha)
   if (aus?.parcial) ocupados.push({ inicio: open, fin: open + Math.round((aus.horas_afectadas || 0) * 60) })
   const buf = cal.config.minutos_buffer
-  for (const s of ocup[`${mecanicoId}|${fecha}`] || []) ocupados.push({ inicio: s.inicio - buf, fin: s.fin + buf, ordenId: s.ordenId, cotizacionId: s.cotizacionId, desplazable: s.desplazable })
+  for (const s of ocup[`${mecanicoId}|${fecha}`] || []) ocupados.push({ inicio: s.inicio - buf, fin: s.fin + buf })
   let libres: Bloque[] = [{ inicio: open, fin: close }]
   for (const o of ocupados) {
     const sig: Bloque[] = []
@@ -146,21 +163,11 @@ function bloquesLibres(cal: Calendario, ocup: Ocupacion, mecanicoId: number, fec
       if (o.inicio > l.inicio) sig.push({ inicio: l.inicio, fin: Math.min(o.inicio, l.fin) })
       if (o.fin < l.fin) sig.push({ inicio: Math.max(o.fin, l.inicio), fin: l.fin })
     }
-    libres = sig.filter(x => x.fin - x.inicio > 0)
+    libres = sig.filter((x) => x.fin - x.inicio > 0)
   }
   return libres
 }
-
-// Simulación de colocación de T minutos para un mecánico
-function simular(
-  cal: Calendario,
-  ocup: Ocupacion,
-  mecanicoId: number,
-  T: number,
-  direccion: 'adelante' | 'atras',
-  fechaBase: string,
-  ignorarDesplazables: boolean
-): { slots: SlotCalc[]; claveFin: string } | null {
+function simular(cal: Calendario, ocup: Ocupacion, mecanicoId: number, T: number, fechaBase: string): SlotCalc[] | null {
   let restante = T
   const slots: SlotCalc[] = []
   for (let i = 0; i <= cal.config.horizonte_dias && restante > 0; i++) {
@@ -168,419 +175,346 @@ function simular(
     if (esDiaNoLaborable(cal, fecha)) continue
     const aus = ausenciaDe(cal, mecanicoId, fecha)
     if (aus && !aus.parcial) continue
-    let ocupDia = ocup[`${mecanicoId}|${fecha}`] || []
-    if (ignorarDesplazables) ocupDia = ocupDia.filter(b => !b.desplazable)
-    const ocupTmp: Ocupacion = { ...ocup, [`${mecanicoId}|${fecha}`]: ocupDia }
     const minInicio = fecha === hoyLocal() ? ahoraMin() : 0
-    let bloques = bloquesLibres(cal, ocupTmp, mecanicoId, fecha, minInicio)
-    if (direccion === 'atras') bloques = [...bloques].reverse()
-    for (const blk of bloques) {
+    for (const blk of bloquesLibres(cal, ocup, mecanicoId, fecha, minInicio)) {
       if (restante <= 0) break
       const len = blk.fin - blk.inicio
       if (len <= 0) continue
       const take = Math.min(len, restante)
       if (take < restante && take < MIN_FRAG) continue
-      const inicio = direccion === 'adelante' ? blk.inicio : blk.fin - take
-      slots.push({ fecha, inicio, fin: inicio + take, minutos: take, secuencia: slots.length + 1 })
+      slots.push({ fecha, inicio: blk.inicio, fin: blk.inicio + take, minutos: take, secuencia: slots.length + 1 })
       restante -= take
     }
   }
   if (restante > 0 || slots.length === 0) return null
-  const ultimo = slots[slots.length - 1]
-  return { slots, claveFin: `${ultimo.fecha}|${String(ultimo.fin).padStart(4, '0')}` }
+  return slots
+}
+function mejorEn(cal: Calendario, ocup: Ocupacion, mecanicos: Mec[], T: number, fechaBase: string): { mec: Mec; slots: SlotCalc[] } | null {
+  let mejor: { mec: Mec; slots: SlotCalc[] } | null = null
+  let mejorFin = ''
+  for (const m of mecanicos) {
+    const slots = simular(cal, ocup, m.id, T, fechaBase)
+    if (!slots) continue
+    const u = slots[slots.length - 1]
+    const fin = `${u.fecha}|${String(u.fin).padStart(4, '0')}`
+    if (!mejor || fin < mejorFin) { mejor = { mec: m, slots }; mejorFin = fin }
+  }
+  return mejor
+}
+function inyectar(ocup: Ocupacion, mecanicoId: number, slots: SlotCalc[]): void {
+  for (const sl of slots) {
+    const c = `${mecanicoId}|${sl.fecha}`
+    if (!ocup[c]) ocup[c] = []
+    ocup[c].push({ inicio: sl.inicio, fin: sl.fin })
+  }
 }
 
-// ---------- ocupación actual (duras + UNA tentativa vigente por cotización) ----------
-async function cargarOcupacion(desde: string): Promise<Ocupacion> {
-  const cal = await cargarCalendario()
-  const hoy = hoyLocal()
+// ---------- NÚCLEO PURO ----------
+function planificar(cal: Calendario, inamovibles: Ocupacion, items: Item[], todosMec: Mec[]): { asig: Map<string, Asignacion>; sinAsignar: string[] } {
+  const orden = [...items].sort((a, b) => {
+    if (a.prioridad !== b.prioridad) return a.prioridad - b.prioridad
+    if (a.fechaBase !== b.fechaBase) return a.fechaBase < b.fechaBase ? -1 : 1
+    return a.id - b.id
+  })
+  const ocup: Ocupacion = {}
+  for (const k of Object.keys(inamovibles)) ocup[k] = inamovibles[k].map((b) => ({ ...b }))
+  const asig = new Map<string, Asignacion>()
+  const sinAsignar: string[] = []
+  for (const it of orden) {
+    const mecanicos = it.mecanicoForzado ? todosMec.filter((m) => m.id === it.mecanicoForzado) : todosMec
+    const r = mejorEn(cal, ocup, mecanicos, it.T, hoyLocal())
+    if (!r) { sinAsignar.push(it.clave); continue }
+    const u = r.slots[r.slots.length - 1]
+    asig.set(it.clave, { mec: r.mec, slots: r.slots, T: it.T, prometida: u.fecha })
+    inyectar(ocup, r.mec.id, r.slots)
+  }
+  return { asig, sinAsignar }
+}
+
+// ---------- lecturas EN LOTE ----------
+async function cargarInamovibles(desde: string): Promise<Ocupacion> {
   const { data } = await supabase
     .from('programacion_slots')
-    .select('mecanico_id, fecha, hora_inicio, hora_fin, programacion_ordenes(id, estado, orden_id, cotizacion_id, cotizaciones(estado, fecha_cotizacion), ordenes_servicio(prioridad))')
+    .select('mecanico_id, fecha, hora_inicio, hora_fin, programacion_ordenes(estado, orden_id, ordenes_servicio(estado))')
     .gte('fecha', desde)
-  // Pasada 1: cabecera tentativa VIGENTE más reciente por cotización (anti-fantasmas)
-  const maxTentativa: Record<number, number> = {}
-  for (const s of data || []) {
-    const head = (s as any).programacion_ordenes
-    if (!head || head.estado !== 'tentativa' || !head.cotizacion_id) continue
-    const cot = head.cotizaciones
-    if (!cot || cot.estado !== 'Pendiente') continue
-    const vence = addDias((cot.fecha_cotizacion || hoy).slice(0, 10), cal.config.dias_validez_promesa)
-    if (vence < hoy) continue
-    if (!maxTentativa[head.cotizacion_id] || head.id > maxTentativa[head.cotizacion_id]) {
-      maxTentativa[head.cotizacion_id] = head.id
-    }
-  }
-  // Pasada 2: construir ocupación
   const ocup: Ocupacion = {}
   for (const s of data || []) {
     const head = (s as any).programacion_ordenes
-    const est = head?.estado
-    if (!est || est === 'cancelada' || est === 'completada') continue
-    let incluir = false
-    if (est === 'tentativa') {
-      incluir = !!head?.cotizacion_id && maxTentativa[head.cotizacion_id] === head.id
-    } else {
-      incluir = true
-    }
-    if (!incluir) continue
-    const pri = head?.ordenes_servicio?.prioridad ?? 2
+    if (!head) continue
+    if (head.estado === 'cancelada' || head.estado === 'completada' || head.estado === 'tentativa') continue
+    if (head.ordenes_servicio?.estado !== 'En Proceso') continue
     const clave = `${s.mecanico_id}|${s.fecha}`
     if (!ocup[clave]) ocup[clave] = []
-    ocup[clave].push({
-      inicio: minDeHora(s.hora_inicio) ?? 0,
-      fin: minDeHora(s.hora_fin) ?? 0,
-      ordenId: head?.orden_id ?? undefined,
-      cotizacionId: head?.cotizacion_id ?? undefined,
-      desplazable: est === 'pendiente' && pri >= 2
-    })
+    ocup[clave].push({ inicio: minDeHora(s.hora_inicio) ?? 0, fin: minDeHora(s.hora_fin) ?? 0 })
   }
   return ocup
 }
 
-// ✅ FIX: quitar de la ocupación los bloques de una cotización dada
-// (para que una cotización nunca compita contra su propia reserva previa)
-function quitarCotizacion(ocup: Ocupacion, cotizacionId: number): Ocupacion {
-  const out: Ocupacion = {}
-  for (const clave of Object.keys(ocup)) {
-    const bloques = ocup[clave].filter(b => b.cotizacionId !== cotizacionId)
-    if (bloques.length > 0) out[clave] = bloques
-  }
-  return out
-}
-
-// ---------- duración de la orden ----------
-export async function minutosDeOrden(ordenId: number): Promise<number> {
-  const { data: cfg } = await supabase.from('taller_configuracion').select('minutos_buffer').eq('id', 1).single()
-  const buffer = cfg?.minutos_buffer ?? 15
-  const { data: det } = await supabase.from('detalle_ordenes_servicio').select('tipo, cantidad, servicio_id').eq('orden_id', ordenId).eq('tipo', 'servicio')
-  if (!det || det.length === 0) return 0
-  const ids = det.map((d: any) => d.servicio_id)
-  const { data: srv } = await supabase.from('servicios').select('id, tiempo_preparacion_min, tiempo_ejecucion_min, tiempo_limpieza_min').in('id', ids)
-  const mapa = new Map((srv || []).map((s: any) => [s.id, s]))
+function duracionDesdeDetalles(det: { cantidad: number; servicio_id: number }[], srvMap: Map<number, any>, buffer: number): number {
   let t = buffer
   for (const d of det) {
-    const s = mapa.get(d.servicio_id)
+    const s = srvMap.get(d.servicio_id)
     if (!s) continue
     t += (s.tiempo_preparacion_min || 0) + (s.tiempo_ejecucion_min || 0) * (d.cantidad || 1) + (s.tiempo_limpieza_min || 0)
   }
   return t
 }
 
-function minutosDeLineas(lineas: LineaServicio[], serviciosCache: any[], buffer: number): number {
-  let t = buffer
-  for (const l of lineas) {
-    const s = serviciosCache.find(x => x.id === l.servicio_id)
-    if (!s) continue
-    t += (s.tiempo_preparacion_min || 0) + (s.tiempo_ejecucion_min || 0) * (l.cantidad || 1) + (s.tiempo_limpieza_min || 0)
+async function cargarReubicables(cal: Calendario, buffer: number, excluir: Set<string>): Promise<{ items: Item[]; srvMap: Map<number, any> }> {
+  const [srvR, ordsR, cotsR] = await Promise.all([
+    supabase.from('servicios').select('id, tiempo_preparacion_min, tiempo_ejecucion_min, tiempo_limpieza_min'),
+    supabase.from('ordenes_servicio').select('id, prioridad, fecha_ingreso').eq('estado', 'Pendiente'),
+    supabase.from('cotizaciones').select('id, fecha_cotizacion').eq('estado', 'Pendiente')
+  ])
+  const srvMap = new Map((srvR.data || []).map((s: any) => [s.id, s]))
+  const hoy = hoyLocal()
+
+  const ordIds = (ordsR.data || []).map((o: any) => o.id)
+  const detOrdR = ordIds.length
+    ? await supabase.from('detalle_ordenes_servicio').select('orden_id, cantidad, servicio_id').in('orden_id', ordIds).eq('tipo', 'servicio')
+    : { data: [] as any[] }
+  const porOrden = new Map<number, { cantidad: number; servicio_id: number }[]>()
+  for (const d of detOrdR.data || []) {
+    const arr = porOrden.get(d.orden_id) || []
+    arr.push({ cantidad: d.cantidad, servicio_id: d.servicio_id })
+    porOrden.set(d.orden_id, arr)
   }
-  return t
+
+  const cotsVigentes = (cotsR.data || []).filter((c: any) => {
+    const vence = addDias(String(c.fecha_cotizacion || hoy).slice(0, 10), cal.config.dias_validez_promesa)
+    return vence >= hoy
+  })
+  const cotIds = cotsVigentes.map((c: any) => c.id)
+  const detCotR = cotIds.length
+    ? await supabase.from('detalle_cotizaciones').select('cotizacion_id, cantidad, servicio_id').in('cotizacion_id', cotIds).eq('tipo', 'servicio')
+    : { data: [] as any[] }
+  const porCot = new Map<number, LineaServicio[]>()
+  for (const d of detCotR.data || []) {
+    const arr = porCot.get(d.cotizacion_id) || []
+    arr.push({ servicio_id: d.servicio_id, cantidad: d.cantidad })
+    porCot.set(d.cotizacion_id, arr)
+  }
+
+  const items: Item[] = []
+  for (const o of ordsR.data || []) {
+    const clave = `O${o.id}`
+    if (excluir.has(clave)) continue
+    const T = duracionDesdeDetalles(porOrden.get(o.id) || [], srvMap, buffer)
+    if (T <= 0) continue
+    items.push({ kind: 'O', id: o.id, prioridad: o.prioridad ?? 2, T, fechaBase: String(o.fecha_ingreso || hoy).slice(0, 10), clave })
+  }
+  for (const c of cotsVigentes) {
+    const clave = `C${c.id}`
+    if (excluir.has(clave)) continue
+    const lineas = porCot.get(c.id) || []
+    if (lineas.length === 0) continue
+    const T = duracionDesdeDetalles(lineas.map((l) => ({ cantidad: l.cantidad, servicio_id: l.servicio_id })), srvMap, buffer)
+    if (T <= buffer) continue
+    items.push({ kind: 'C', id: c.id, prioridad: 2, T, fechaBase: String(c.fecha_cotizacion || hoy).slice(0, 10), clave })
+  }
+  return { items, srvMap }
 }
 
-// ---------- escritura con verificación optimista ----------
-async function escribir(ordenId: number, mecanicoId: number, slots: SlotCalc[], minutos: number, fechaPrometida: string): Promise<boolean> {
-  for (const sl of slots) {
-    const { data: choque } = await supabase
-      .from('programacion_slots')
-      .select('id, programacion_ordenes(estado)')
-      .eq('mecanico_id', mecanicoId)
-      .eq('fecha', sl.fecha)
-      .lt('hora_inicio', hhmm(sl.fin))
-      .gt('hora_fin', hhmm(sl.inicio))
-    const activos = (choque || []).filter((c: any) => {
-      const e = c.programacion_ordenes?.estado
-      return e && e !== 'cancelada' && e !== 'completada' && e !== 'tentativa'
-    })
-    if (activos.length > 0) return false
-  }
-  const { data: exist } = await supabase.from('programacion_ordenes').select('id').eq('orden_id', ordenId).single()
-  let headId: number
-  if (exist) {
-    await supabase.from('programacion_slots').delete().eq('programacion_id', exist.id)
-    const { error } = await supabase.from('programacion_ordenes').update({
-      mecanico_id: mecanicoId, minutos_totales: minutos, fecha_prometida: fechaPrometida, estado: 'pendiente', tipo_asignacion: 'interna'
-    }).eq('id', exist.id)
-    if (error) return false
-    headId = exist.id
-  } else {
-    const { data: head, error } = await supabase.from('programacion_ordenes').insert({
-      orden_id: ordenId, mecanico_id: mecanicoId, minutos_totales: minutos, fecha_prometida: fechaPrometida, estado: 'pendiente', tipo_asignacion: 'interna'
-    }).select('id').single()
-    if (error || !head) return false
-    headId = head.id
-  }
-  const { error: errSlots } = await supabase.from('programacion_slots').insert(
-    slots.map(sl => ({
-      programacion_id: headId,
-      mecanico_id: mecanicoId,
-      fecha: sl.fecha,
-      hora_inicio: hhmm(sl.inicio),
-      hora_fin: hhmm(sl.fin),
-      minutos: sl.minutos,
-      secuencia: sl.secuencia
-    }))
-  )
-  if (errSlots) return false
-  await supabase.from('ordenes_servicio').update({ mecanico_id: mecanicoId, fecha_entrega_estimada: fechaPrometida }).eq('id', ordenId)
-  await supabase.from('auditoria_programacion').insert({ programacion_id: headId, accion: 'programacion_automatica', detalle: { mecanico_id: mecanicoId, slots, minutos } })
-  return true
-}
+// ---------- COMMIT EN LOTE ----------
+async function commit(_cal: Calendario, asig: Map<string, Asignacion>, items: Item[], excluir: Set<string>): Promise<void> {
+  const ordIds = items.filter((i) => i.kind === 'O').map((i) => i.id)
+  const exclO = [...excluir].filter((k) => k.startsWith('O')).map((k) => parseInt(k.slice(1)))
+  const purgarO = [...new Set([...ordIds, ...exclO])]
 
-export async function liberarProgramacion(ordenId: number, motivo: string): Promise<void> {
-  const { data: head } = await supabase.from('programacion_ordenes').select('id').eq('orden_id', ordenId).single()
-  if (!head) return
-  await supabase.from('auditoria_programacion').insert({ programacion_id: head.id, accion: 'liberacion', detalle: { motivo } })
-  await supabase.from('programacion_slots').delete().eq('programacion_id', head.id)
-  await supabase.from('programacion_ordenes').delete().eq('id', head.id)
-}
+  const headsO = purgarO.length ? (await supabase.from('programacion_ordenes').select('id').in('orden_id', purgarO)).data || [] : []
+  const headsT = (await supabase.from('programacion_ordenes').select('id').eq('estado', 'tentativa')).data || []
+  const headPurgeIds = [...new Set([...headsO, ...headsT].map((h: any) => h.id))]
+  if (headPurgeIds.length) await supabase.from('programacion_slots').delete().in('programacion_id', headPurgeIds)
 
-// ---------- RESERVAS TENTATIVAS (cotizaciones sin aprobar) ----------
-// ✅ ROBUSTO: borra TODAS las tentativas de la cotización (sin .single() que fallaba en silencio)
-export async function liberarCotizacion(cotizacionId: number, motivo: string): Promise<void> {
-  const { data: heads } = await supabase
-    .from('programacion_ordenes')
-    .select('id')
-    .eq('cotizacion_id', cotizacionId)
-    .eq('estado', 'tentativa')
-  if (!heads || heads.length === 0) return
-  const ids = heads.map((h: any) => h.id)
-  for (const id of ids) {
-    await supabase.from('auditoria_programacion').insert({ programacion_id: id, accion: 'liberacion_tentativa', detalle: { motivo } })
-  }
-  await supabase.from('programacion_slots').delete().in('programacion_id', ids)
-  await supabase.from('programacion_ordenes').delete().in('id', ids)
-}
+  if (purgarO.length) await supabase.from('programacion_ordenes').delete().in('orden_id', purgarO)
+  await supabase.from('programacion_ordenes').delete().eq('estado', 'tentativa')
 
-// ✅ FIX DE RAÍZ: primero libera la reserva previa, LUEGO carga ocupación y simula.
-// Así la cotización nunca se esquiva a sí misma ni deja huecos huérfanos.
-export async function programarCotizacion(cotizacionId: number, lineas: LineaServicio[], serviciosCache: any[]): Promise<ResultadoProgramacion> {
-  const cal = await cargarCalendario()
-  const T = minutosDeLineas(lineas, serviciosCache, cal.config.minutos_buffer)
-  if (T <= cal.config.minutos_buffer) return { ok: false, error: 'Agrega servicios a la cotización para calcular la promesa.' }
-  // 1) Se libera ANTES de simular (elimina el fantasma de la propia cotización)
-  await liberarCotizacion(cotizacionId, 'Recálculo de promesa por guardado/edición de cotización')
-  // 2) Ocupación limpia + doble seguro: se excluyen bloques de esta cotización
-  let ocup = await cargarOcupacion(hoyLocal())
-  ocup = quitarCotizacion(ocup, cotizacionId)
-  const { data: todos } = await supabase.from('mecanicos').select('id, nombres, apellidos')
-  let mejor: { mec: any; sim: NonNullable<ReturnType<typeof simular>> } | null = null
-  for (const m of todos || []) {
-    const sim = simular(cal, ocup, m.id, T, 'adelante', hoyLocal(), false)
-    if (sim && (!mejor || sim.claveFin < mejor.sim.claveFin)) mejor = { mec: m, sim }
-  }
-  if (!mejor) return { ok: false, error: `Sin capacidad en ${cal.config.horizonte_dias} días. Considera subcontratar o ampliar horario.` }
-  // 3) Inserción de la nueva reserva única
-  const { data: head, error } = await supabase.from('programacion_ordenes').insert({
-    orden_id: null,
-    cotizacion_id: cotizacionId,
-    mecanico_id: mejor.mec.id,
-    minutos_totales: T,
-    fecha_prometida: mejor.sim.slots[mejor.sim.slots.length - 1].fecha,
-    estado: 'tentativa',
-    tipo_asignacion: 'interna'
-  }).select('id').single()
-  if (error || !head) return { ok: false, error: 'No se pudo guardar la reserva tentativa: ' + (error?.message || '') }
-  await supabase.from('programacion_slots').insert(
-    mejor.sim.slots.map(sl => ({
-      programacion_id: head.id,
-      mecanico_id: mejor!.mec.id,
-      fecha: sl.fecha,
-      hora_inicio: hhmm(sl.inicio),
-      hora_fin: hhmm(sl.fin),
-      minutos: sl.minutos,
-      secuencia: sl.secuencia
-    }))
-  )
-  // 4) Dedupe defensivo post-inserción (cubre guardados concurrentes)
-  const { data: heads } = await supabase
-    .from('programacion_ordenes')
-    .select('id')
-    .eq('cotizacion_id', cotizacionId)
-    .eq('estado', 'tentativa')
-    .order('id', { ascending: false })
-  if (heads && heads.length > 1) {
-    const viejos = heads.slice(1).map((h: any) => h.id)
-    await supabase.from('programacion_slots').delete().in('programacion_id', viejos)
-    await supabase.from('programacion_ordenes').delete().in('id', viejos)
-  }
-  await supabase.from('auditoria_programacion').insert({ programacion_id: head.id, accion: 'reserva_tentativa', detalle: { cotizacion_id: cotizacionId, slots: mejor.sim.slots, minutos: T } })
-  return {
-    ok: true,
-    mecanicoId: mejor.mec.id,
-    mecanicoNombre: `${mejor.mec.nombres} ${mejor.mec.apellidos}`,
-    fechaPrometida: mejor.sim.slots[mejor.sim.slots.length - 1].fecha,
-    minutosTotales: T,
-    slots: mejor.sim.slots
-  }
-}
-
-// Convierte la reserva tentativa en programación dura al aprobar la cotización
-export async function confirmarCotizacion(cotizacionId: number, ordenId: number): Promise<ResultadoProgramacion> {
-  const { data: head } = await supabase.from('programacion_ordenes').select('*').eq('cotizacion_id', cotizacionId).eq('estado', 'tentativa').order('id', { ascending: false }).limit(1).maybeSingle()
-  if (!head) return { ok: false, error: 'La cotización no tiene reserva tentativa vigente.' }
-  const { data: slots } = await supabase.from('programacion_slots').select('*').eq('programacion_id', head.id).order('secuencia')
-  if (!slots || slots.length === 0) return { ok: false, error: 'Reserva tentativa sin slots.' }
-  for (const sl of slots) {
-    const { data: choque } = await supabase
-      .from('programacion_slots')
-      .select('id, programacion_ordenes(estado)')
-      .eq('mecanico_id', head.mecanico_id)
-      .eq('fecha', sl.fecha)
-      .lt('hora_inicio', sl.hora_fin)
-      .gt('hora_fin', sl.hora_inicio)
-      .neq('programacion_id', head.id)
-    const duros = (choque || []).filter((c: any) => {
-      const e = c.programacion_ordenes?.estado
-      return e && e !== 'cancelada' && e !== 'completada' && e !== 'tentativa'
-    })
-    if (duros.length > 0) {
-      await liberarCotizacion(cotizacionId, 'Conflicto de capacidad al aprobar; se reprograma la orden')
-      return { ok: false, error: 'El slot reservado fue tomado antes de aprobar. Se reprogramará la orden.' }
+  const filasHead = items.map((it) => {
+    const a = asig.get(it.clave)
+    if (!a) return null
+    return {
+      orden_id: it.kind === 'O' ? it.id : null,
+      cotizacion_id: it.kind === 'C' ? it.id : null,
+      mecanico_id: a.mec.id,
+      minutos_totales: a.T,
+      fecha_prometida: a.prometida,
+      estado: it.kind === 'C' ? 'tentativa' : 'pendiente',
+      tipo_asignacion: 'interna'
     }
+  }).filter(Boolean) as any[]
+  if (filasHead.length === 0) return
+  const { data: headsNew, error: errH } = await supabase.from('programacion_ordenes').insert(filasHead).select('id, orden_id, cotizacion_id')
+  if (errH || !headsNew) return
+  const headByO = new Map<number, number>()
+  const headByC = new Map<number, number>()
+  for (const h of headsNew as any[]) {
+    if (h.orden_id != null) headByO.set(h.orden_id, h.id)
+    if (h.cotizacion_id != null) headByC.set(h.cotizacion_id, h.id)
   }
-  const { error } = await supabase.from('programacion_ordenes').update({ orden_id: ordenId, estado: 'pendiente' }).eq('id', head.id)
-  if (error) return { ok: false, error: error.message }
-  await supabase.from('ordenes_servicio').update({ mecanico_id: head.mecanico_id, fecha_entrega_estimada: head.fecha_prometida }).eq('id', ordenId)
-  await supabase.from('auditoria_programacion').insert({ programacion_id: head.id, accion: 'conversion_tentativa_a_orden', detalle: { cotizacion_id: cotizacionId, orden_id: ordenId } })
-  const { data: mec } = await supabase.from('mecanicos').select('nombres, apellidos').eq('id', head.mecanico_id).single()
+
+  const filasSlot: any[] = []
+  for (const it of items) {
+    const a = asig.get(it.clave)
+    if (!a) continue
+    const hid = it.kind === 'O' ? headByO.get(it.id) : headByC.get(it.id)
+    if (hid == null) continue
+    for (const sl of a.slots) filasSlot.push({ programacion_id: hid, mecanico_id: a.mec.id, fecha: sl.fecha, hora_inicio: hhmm(sl.inicio), hora_fin: hhmm(sl.fin), minutos: sl.minutos, secuencia: sl.secuencia })
+  }
+  if (filasSlot.length) await supabase.from('programacion_slots').insert(filasSlot)
+
+  const idsO = items.filter((i) => i.kind === 'O').map((i) => i.id)
+  await chunked(idsO, async (oid) => {
+    const a = asig.get(`O${oid}`)
+    if (!a) return
+    await supabase.from('ordenes_servicio').update({ mecanico_id: a.mec.id, fecha_entrega_estimada: a.prometida }).eq('id', oid)
+  })
+  const idsC = items.filter((i) => i.kind === 'C').map((i) => i.id)
+  await chunked(idsC, async (cid) => {
+    const a = asig.get(`C${cid}`)
+    if (!a) return
+    await supabase.from('cotizaciones').update({ fecha_entrega_estimada: a.prometida }).eq('id', cid)
+  })
+
+  const aud: any[] = []
+  for (const it of items) {
+    const a = asig.get(it.clave)
+    if (!a) continue
+    const hid = it.kind === 'O' ? headByO.get(it.id) : headByC.get(it.id)
+    if (hid == null) continue
+    aud.push({ programacion_id: hid, accion: 'replanificacion', detalle: { item: it.clave, mecanico_id: a.mec.id, minutos: a.T, prometida: a.prometida } })
+  }
+  if (aud.length) void Promise.resolve(supabase.from('auditoria_programacion').insert(aud)).catch(() => {})
+}
+
+// ---------- REPLANIFICADOR GLOBAL ----------
+async function replanificarTodo(pin?: { clave: string; mecanicoForzado?: number }, excluir?: Set<string>): Promise<{ asig: Map<string, Asignacion>; sinAsignar: string[]; items: Item[] }> {
+  const cal = await cargarCalendario()
+  const buffer = cal.config.minutos_buffer
+  const ex = excluir || new Set<string>()
+  const [todosR, inamovibles, rec] = await Promise.all([
+    supabase.from('mecanicos').select('id, nombres, apellidos'),
+    cargarInamovibles(hoyLocal()),
+    cargarReubicables(cal, buffer, ex)
+  ])
+  const mecanicos = (todosR.data || []) as Mec[]
+  let items = rec.items
+  if (pin) {
+    const it = items.find((i) => i.clave === pin.clave)
+    if (it && pin.mecanicoForzado) it.mecanicoForzado = pin.mecanicoForzado
+  }
+  const { asig, sinAsignar } = planificar(cal, inamovibles, items, mecanicos)
+  await commit(cal, asig, items, ex)
+  return { asig, sinAsignar, items }
+}
+
+function resDe(asig: Map<string, Asignacion>, clave: string, sinAsignar: string[], _items: Item[], avisoExtra?: string): ResultadoProgramacion {
+  const a = asig.get(clave)
+  if (!a) {
+    const msg = sinAsignar.includes(clave)
+      ? 'Sin capacidad en el horizonte para este ítem. Considera subcontratar o ampliar horario.'
+      : 'Ítem no encontrado en el backlog activo.'
+    return { ok: false, error: msg }
+  }
   return {
     ok: true,
-    mecanicoId: head.mecanico_id,
-    mecanicoNombre: mec ? `${mec.nombres} ${mec.apellidos}` : undefined,
-    fechaPrometida: head.fecha_prometida,
-    minutosTotales: head.minutos_totales
+    aviso: avisoExtra,
+    mecanicoId: a.mec.id,
+    mecanicoNombre: `${a.mec.nombres} ${a.mec.apellidos}`,
+    fechaPrometida: a.prometida,
+    minutosTotales: a.T,
+    slots: a.slots,
+    desplazadas: []
   }
 }
 
-// ---------- programación principal ----------
+// =====================================================
+// WRAPPERS (firmas idénticas a las que importan los .tsx)
+// =====================================================
+
 export async function programarOrden(ordenId: number, opts?: { mecanicoForzado?: number; permitirDesplazar?: boolean; motivo?: string }): Promise<ResultadoProgramacion> {
-  const cal = await cargarCalendario()
-  const T = await minutosDeOrden(ordenId)
-  if (T <= 0) return { ok: false, error: 'La orden no tiene servicios con tiempo definido. Agrega servicios y vuelve a programar.' }
-  const { data: orden } = await supabase.from('ordenes_servicio').select('prioridad, tipo_orden, fecha_ingreso').eq('id', ordenId).single()
-  const prioridad = orden?.prioridad ?? 2
-  const direccion: 'adelante' | 'atras' = prioridad === 4 ? 'atras' : 'adelante'
-  const fechaBase = hoyLocal()
-  const ocup = await cargarOcupacion(fechaBase)
-
-  const { data: det } = await supabase.from('detalle_ordenes_servicio').select('servicio_id').eq('orden_id', ordenId).eq('tipo', 'servicio')
-  const ids = (det || []).map((d: any) => d.servicio_id)
-  let especialidad: string | null = null
-  if (ids.length) {
-    const { data: srv } = await supabase.from('servicios').select('requiere_especialista, especialidad').in('id', ids)
-    const req = (srv || []).find((s: any) => s.requiere_especialista && s.especialidad)
-    if (req) especialidad = req.especialidad
-  }
-  let mecanicos: any[] = []
-  const { data: todos } = await supabase.from('mecanicos').select('id, nombres, apellidos')
-  mecanicos = todos || []
-  let aviso: string | undefined
-  if (especialidad) {
-    const { data: esp } = await supabase.from('mecanico_especialidades').select('mecanico_id').eq('especialidad', especialidad)
-    const idsEsp = new Set((esp || []).map((e: any) => e.mecanico_id))
-    if (idsEsp.size > 0) mecanicos = mecanicos.filter(m => idsEsp.has(m.id))
-    else aviso = `Ningún mecánico tiene la especialidad "${especialidad}". Se asignó al mejor disponible.`
-  }
-  if (opts?.mecanicoForzado) mecanicos = mecanicos.filter(m => m.id === opts.mecanicoForzado)
-  if (mecanicos.length === 0) return { ok: false, error: 'No hay mecánicos candidatos disponibles.' }
-
-  let mejor: { mec: any; sim: NonNullable<ReturnType<typeof simular>> } | null = null
-  for (const m of mecanicos) {
-    const sim = simular(cal, ocup, m.id, T, direccion, fechaBase, false)
-    if (sim && (!mejor || sim.claveFin < mejor.sim.claveFin)) mejor = { mec: m, sim }
-  }
-  if (!mejor) return { ok: false, error: `Sin capacidad en ${cal.config.horizonte_dias} días. Considera subcontratar o ampliar horario.` }
-
-  let desplazadas: number[] = []
-  if (prioridad === 1 && opts?.permitirDesplazar !== false) {
-    let mejorVIP: { mec: any; sim: NonNullable<ReturnType<typeof simular>> } | null = null
-    for (const m of mecanicos) {
-      const sim = simular(cal, ocup, m.id, T, 'adelante', fechaBase, true)
-      if (sim && (!mejorVIP || sim.claveFin < mejorVIP.sim.claveFin)) mejorVIP = { mec: m, sim }
-    }
-    if (mejorVIP && mejorVIP.sim.claveFin < mejor.sim.claveFin) {
-      const afectadas = new Set<number>()
-      for (const sl of mejorVIP.sim.slots) {
-        for (const b of ocup[`${mejorVIP.mec.id}|${sl.fecha}`] || []) {
-          if (b.desplazable && b.ordenId && b.inicio < sl.fin && b.fin > sl.inicio) afectadas.add(b.ordenId)
-        }
-      }
-      if (afectadas.size <= 3) {
-        desplazadas = [...afectadas]
-        mejor = { mec: mejorVIP.mec, sim: mejorVIP.sim }
-      }
-    }
-  }
-
-  const escrito = await escribir(ordenId, mejor.mec.id, mejor.sim.slots, T, mejor.sim.slots[mejor.sim.slots.length - 1].fecha)
-  if (!escrito) return { ok: false, error: 'Capacidad modificada durante la programación. Reintenta.' }
-
-  for (const oid of desplazadas) {
-    await liberarProgramacion(oid, 'Desplazada por orden prioritaria/VIP')
-    await programarOrden(oid, { permitirDesplazar: false })
-  }
-
-  return {
-    ok: true,
-    aviso,
-    mecanicoId: mejor.mec.id,
-    mecanicoNombre: `${mejor.mec.nombres} ${mejor.mec.apellidos}`,
-    fechaPrometida: mejor.sim.slots[mejor.sim.slots.length - 1].fecha,
-    minutosTotales: T,
-    slots: mejor.sim.slots,
-    desplazadas
-  }
+  const { asig, sinAsignar, items } = await replanificarTodo(opts?.mecanicoForzado ? { clave: `O${ordenId}`, mecanicoForzado: opts.mecanicoForzado } : undefined)
+  return resDe(asig, `O${ordenId}`, sinAsignar, items, items.length > 1 ? `Backlog re-compactado (${items.length} ítems reevaluados).` : undefined)
 }
 
 export async function reprogramarOrden(ordenId: number, motivo: string, mecanicoForzado?: number): Promise<ResultadoProgramacion> {
-  await liberarProgramacion(ordenId, motivo)
-  const r = await programarOrden(ordenId, { mecanicoForzado })
-  if (r.ok) {
-    const { data: head } = await supabase.from('programacion_ordenes').select('id').eq('orden_id', ordenId).single()
-    if (head) await supabase.from('auditoria_programacion').insert({ programacion_id: head.id, accion: 'reprogramacion', detalle: { motivo } })
+  const { asig, sinAsignar, items } = await replanificarTodo(mecanicoForzado ? { clave: `O${ordenId}`, mecanicoForzado } : undefined)
+  if (asig.get(`O${ordenId}`)) {
+    void Promise.resolve(supabase.from('auditoria_programacion').insert({ programacion_id: null as any, accion: 'reprogramacion', detalle: { orden_id: ordenId, motivo } })).catch(() => {})
   }
-  return r
+  return resDe(asig, `O${ordenId}`, sinAsignar, items)
 }
 
-// ---------- vista previa (asistente de promesa, sin escribir) ----------
-// ✅ FIX: opcionalmente excluye la reserva de la cotización que se está editando
+export async function liberarProgramacion(ordenId: number, motivo: string): Promise<void> {
+  await replanificarTodo(undefined, new Set([`O${ordenId}`]))
+  void Promise.resolve(supabase.from('auditoria_programacion').insert({ programacion_id: null as any, accion: 'liberacion', detalle: { orden_id: ordenId, motivo } })).catch(() => {})
+}
+
+export async function programarCotizacion(cotizacionId: number, _lineas: LineaServicio[], _serviciosCache: any[]): Promise<ResultadoProgramacion> {
+  const { asig, sinAsignar, items } = await replanificarTodo()
+  return resDe(asig, `C${cotizacionId}`, sinAsignar, items)
+}
+
+export async function liberarCotizacion(cotizacionId: number, motivo: string): Promise<void> {
+  await replanificarTodo(undefined, new Set([`C${cotizacionId}`]))
+  void Promise.resolve(supabase.from('auditoria_programacion').insert({ programacion_id: null as any, accion: 'liberacion_tentativa', detalle: { cotizacion_id: cotizacionId, motivo } })).catch(() => {})
+}
+
+export async function confirmarCotizacion(cotizacionId: number, ordenId: number): Promise<ResultadoProgramacion> {
+  const { asig, sinAsignar, items } = await replanificarTodo()
+  void Promise.resolve(supabase.from('auditoria_programacion').insert({ programacion_id: null as any, accion: 'conversion_tentativa_a_orden', detalle: { cotizacion_id: cotizacionId, orden_id: ordenId } })).catch(() => {})
+  return resDe(asig, `O${ordenId}`, sinAsignar, items)
+}
+
 export async function previewPromesa(lineas: LineaServicio[], prioridad: number, serviciosCache: any[], excluirCotizacion?: number): Promise<ResultadoProgramacion> {
   const cal = await cargarCalendario()
-  const T = minutosDeLineas(lineas, serviciosCache, cal.config.minutos_buffer)
-  if (T <= cal.config.minutos_buffer) return { ok: false, error: 'Selecciona servicios para calcular la promesa.' }
-  let ocup = await cargarOcupacion(hoyLocal())
-  if (excluirCotizacion) ocup = quitarCotizacion(ocup, excluirCotizacion)
-  const direccion: 'adelante' | 'atras' = prioridad === 4 ? 'atras' : 'adelante'
-  const { data: todos } = await supabase.from('mecanicos').select('id, nombres, apellidos')
-  let mejor: { mec: any; sim: NonNullable<ReturnType<typeof simular>> } | null = null
-  for (const m of todos || []) {
-    const sim = simular(cal, ocup, m.id, T, direccion, hoyLocal(), false)
-    if (sim && (!mejor || sim.claveFin < mejor.sim.claveFin)) mejor = { mec: m, sim }
-  }
-  if (!mejor) return { ok: false, error: 'Sin capacidad en el horizonte. Considera subcontratar.' }
-  return {
-    ok: true,
-    mecanicoId: mejor.mec.id,
-    mecanicoNombre: `${mejor.mec.nombres} ${mejor.mec.apellidos}`,
-    fechaPrometida: mejor.sim.slots[mejor.sim.slots.length - 1].fecha,
-    minutosTotales: T,
-    slots: mejor.sim.slots
-  }
+  const buffer = cal.config.minutos_buffer
+  const T = duracionDesdeDetalles(lineas.map((l) => ({ cantidad: l.cantidad, servicio_id: l.servicio_id })), new Map(serviciosCache.map((s: any) => [s.id, s])), buffer)
+  if (T <= buffer) return { ok: false, error: 'Selecciona servicios para calcular la promesa.' }
+  const ex = excluirCotizacion ? new Set([`C${excluirCotizacion}`]) : new Set<string>()
+  const [todosR, inamovibles, rec] = await Promise.all([
+    supabase.from('mecanicos').select('id, nombres, apellidos'),
+    cargarInamovibles(hoyLocal()),
+    cargarReubicables(cal, buffer, ex)
+  ])
+  const nuevo: Item = { kind: 'N', id: 0, prioridad, T, fechaBase: hoyLocal(), clave: 'NEW' }
+  const { asig } = planificar(cal, inamovibles, [...rec.items, nuevo], (todosR.data || []) as Mec[])
+  const a = asig.get('NEW')
+  if (!a) return { ok: false, error: 'Sin capacidad en el horizonte. Considera subcontratar.' }
+  return { ok: true, mecanicoId: a.mec.id, mecanicoNombre: `${a.mec.nombres} ${a.mec.apellidos}`, fechaPrometida: a.prometida, minutosTotales: a.T, slots: a.slots }
 }
 
-// ---------- carga para panel de capacidad ----------
+export async function minutosDeOrden(ordenId: number): Promise<number> {
+  const { data: cfg } = await supabase.from('taller_configuracion').select('minutos_buffer').eq('id', 1).single()
+  const buffer = cfg?.minutos_buffer ?? 15
+  const [detR, srvR] = await Promise.all([
+    supabase.from('detalle_ordenes_servicio').select('cantidad, servicio_id').eq('orden_id', ordenId).eq('tipo', 'servicio'),
+    supabase.from('servicios').select('id, tiempo_preparacion_min, tiempo_ejecucion_min, tiempo_limpieza_min')
+  ])
+  if (!detR.data || detR.data.length === 0) return 0
+  const srvMap = new Map((srvR.data || []).map((s: any) => [s.id, s]))
+  return duracionDesdeDetalles(detR.data as any[], srvMap, buffer)
+}
+
 export async function calcularCargaRango(desde: string, hasta: string): Promise<{ mecanicoId: number; comprometidos: number; disponibles: number }[]> {
-  const cal = await cargarCalendario()
-  const { data: mec } = await supabase.from('mecanicos').select('id')
-  const ocup = await cargarOcupacion(desde)
+  const [cal, mecR, slotsR] = await Promise.all([
+    cargarCalendario(),
+    supabase.from('mecanicos').select('id'),
+    supabase.from('programacion_slots').select('mecanico_id, fecha, hora_inicio, hora_fin, programacion_ordenes(estado)').gte('fecha', desde)
+  ])
+  const ocup: Ocupacion = {}
+  for (const s of slotsR.data || []) {
+    const st = (s as any).programacion_ordenes?.estado
+    if (!st || st === 'cancelada' || st === 'completada') continue
+    const clave = `${s.mecanico_id}|${s.fecha}`
+    if (!ocup[clave]) ocup[clave] = []
+    ocup[clave].push({ inicio: minDeHora(s.hora_inicio) ?? 0, fin: minDeHora(s.hora_fin) ?? 0 })
+  }
   const out: { mecanicoId: number; comprometidos: number; disponibles: number }[] = []
-  for (const m of mec || []) {
-    let comp = 0
-    let disp = 0
-    let f = desde
+  for (const m of mecR.data || []) {
+    let comp = 0, disp = 0, f = desde
     while (f <= hasta) {
       if (!esDiaNoLaborable(cal, f) && !ausenciaDe(cal, m.id, f)) {
-        const h = cal.horarios.find(x => x.dia_semana === dowDe(f))
+        const h = cal.horarios.find((x) => x.dia_semana === dowDe(f))
         const alm = (minDeHora(h?.almuerzo_fin ?? null) ?? 0) - (minDeHora(h?.almuerzo_inicio ?? null) ?? 0)
         disp += Math.max(0, (minDeHora(h?.hora_cierre ?? null) ?? 0) - (minDeHora(h?.hora_apertura ?? null) ?? 0) - alm)
       }

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { hoyLocal } from '../utils/fechas'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { Edit, X, Search, Eye, Package, Ban, Save, Plus, Wrench, CheckCircle, AlertTriangle, Lock, Camera, Shield, RefreshCw, Clock } from 'lucide-react'
+import { Edit, X, Search, Eye, Package, Ban, Save, Plus, Wrench, CheckCircle, AlertTriangle, Lock, Camera, Shield, RefreshCw, Clock, Flame } from 'lucide-react'
 import toast from 'react-hot-toast'
 import ModalDetalle from '../components/ModalDetalle'
 import ControlesPaginacion from '../components/ControlesPaginacion'
@@ -30,6 +30,7 @@ interface OrdenServicio {
   detalles_requeridos: string
   fecha_registro: string
   tipo_orden: string
+  prioridad?: number
   descripcion_interna?: string | null
   reclamacion_garantia_id?: number
   numero_reclamacion?: string
@@ -95,7 +96,7 @@ export default function OrdenesInternas() {
     estado: 'Pendiente', diagnostico: '', trabajo_realizado: '',
     costo_estimado: '', costo_real: '', fecha_ingreso: '',
     fecha_entrega_estimada: '', fecha_entrega_real: '', notas: '',
-    descripcion_interna: ''
+    descripcion_interna: '', es_urgente: false
   })
 
   useEffect(() => {
@@ -106,19 +107,20 @@ export default function OrdenesInternas() {
     fetchOrdenes()
   }, [paginaActual, registrosPorPagina, searchTerm, ordenesIndex, filtroTipo])
 
-  // ✅ FCS: asistente de promesa en vivo (las internas son prioridad 4: horas valle)
+  // ✅ FCS: asistente de promesa en vivo (interna urgente = prioridad 3, normal = 4)
   useEffect(() => {
     if (!showForm) { setPromesaPreview(null); return }
     const t = setTimeout(async () => {
       const lineas = detalleServicios.filter(s => s.servicio_id).map(s => ({ servicio_id: s.servicio_id as number, cantidad: s.cantidad }))
       if (lineas.length === 0) { setPromesaPreview(null); return }
       setCalculandoPromesa(true)
-      const r = await previewPromesa(lineas, 4, servicios)
+      const prioridad = formData.es_urgente ? 3 : 4
+      const r = await previewPromesa(lineas, prioridad, servicios)
       setPromesaPreview(r)
       setCalculandoPromesa(false)
     }, 400)
     return () => clearTimeout(t)
-  }, [detalleServicios, showForm, servicios])
+  }, [detalleServicios, showForm, servicios, formData.es_urgente])
 
   async function fetchOrdenesIndex() {
     try {
@@ -288,12 +290,10 @@ export default function OrdenesInternas() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    // ✅ BUG-2: no permitir guardar en estado Completada sin mecánico asignado
     if (formData.estado === 'Completada' && !formData.mecanico_id) {
       toast.error('Una orden en estado Completada debe tener mecánico asignado. Selecciona el mecánico antes de guardar.')
       return
     }
-    // ✅ orden interna sin bicicleta exige descripción del objeto/trabajo
     if (!formData.bicicleta_adquirida_id && !formData.descripcion_interna.trim()) {
       toast.error('Describe el objeto o trabajo (ej. rueda delantera 26") o selecciona una bicicleta del inventario.')
       return
@@ -313,13 +313,13 @@ export default function OrdenesInternas() {
         notas: formData.notas || null,
         descripcion_interna: formData.descripcion_interna.trim() || null,
         tipo_orden: 'interna_bicicleta_usada',
-        precios_a_costo: true
+        precios_a_costo: true,
+        // ✅ NUEVO: prioridad 3 si es urgente, 4 si es normal (el trigger no la sobrescribe si ya viene set)
+        prioridad: formData.es_urgente ? 3 : 4
       }
-      // Solo en INSERT se envía vacío para que el trigger genere el correlativo
       if (!editingId) {
         data.numero_orden = ''
       }
-      // ✅ CORREGIDO: tipado explícito para evitar number | null en programarOrden
       let ordenId: number = editingId ?? 0
       if (editingId) {
         const { error } = await supabase.from('ordenes_servicio').update(data).eq('id', editingId)
@@ -362,7 +362,6 @@ export default function OrdenesInternas() {
           }
         }
       }
-      // ✅ FCS: programación automática al guardar
       if (editingId) {
         if (formData.estado !== 'Cancelada') {
           const r = await reprogramarOrden(editingId, 'Edición de orden interna', formData.mecanico_id ? parseInt(formData.mecanico_id) : undefined)
@@ -398,7 +397,9 @@ export default function OrdenesInternas() {
       fecha_entrega_estimada: o.fecha_entrega_estimada || '',
       fecha_entrega_real: o.fecha_entrega_real || '',
       notas: o.notas || '',
-      descripcion_interna: o.descripcion_interna || ''
+      descripcion_interna: o.descripcion_interna || '',
+      // ✅ NUEVO: marcar urgente si la prioridad es 3
+      es_urgente: (o.prioridad ?? 4) === 3
     })
     setEditingId(o.id); setShowForm(true); await fetchDetalleOrden(o.id)
     setTimeout(() => {
@@ -416,7 +417,6 @@ export default function OrdenesInternas() {
       }
       const { error } = await supabase.from('ordenes_servicio').update({ estado: 'Cancelada' }).eq('id', id)
       if (error) throw error
-      // ✅ FCS: liberar slots programados
       await liberarProgramacion(id, 'Orden cancelada')
       toast.success(`Orden ${numeroOrden} cancelada y reservas liberadas`)
       fetchOrdenes(); fetchInventario(); fetchOrdenesIndex()
@@ -425,7 +425,6 @@ export default function OrdenesInternas() {
     }
   }
 
-  // ✅ FCS: reprogramación manual desde la tabla
   async function handleReprogramar(o: OrdenServicio) {
     if (!confirm(`¿Reprogramar la orden ${o.numero_orden}?\n\nEl motor recalculará mecánico y fecha de entrega según la capacidad actual.`)) return
     const r = await reprogramarOrden(o.id, 'Reprogramación manual desde tabla')
@@ -434,7 +433,6 @@ export default function OrdenesInternas() {
     fetchOrdenes()
   }
 
-  // ✅ BUG-2: bloquear apertura del modal de completado sin mecánico asignado
   async function abrirModalCompletado(orden: OrdenServicio) {
     if (!orden.id) { toast.error('ID de orden no válido'); return }
     if (!orden.mecanico_id) {
@@ -469,7 +467,6 @@ export default function OrdenesInternas() {
         .eq('id', completionOrdenId)
         .single()
       if (errorOrdenActual) throw errorOrdenActual
-      // ✅ BUG-2: doble verificación de mecánico antes de confirmar
       if (!ordenActual.mecanico_id) {
         toast.error('Esta orden no tiene mecánico asignado. Asignalo antes de completar.')
         setShowCompletionModal(false)
@@ -561,7 +558,6 @@ export default function OrdenesInternas() {
         })
         .eq('id', completionOrdenId)
       if (errorOrden) throw errorOrden
-      // ✅ FCS: marcar programación como completada
       await supabase.from('programacion_ordenes').update({ estado: 'completada' }).eq('orden_id', completionOrdenId)
       if (ordenActual.tipo_orden === 'garantia' && ordenActual.reclamacion_garantia_id) {
         const { error: errorReclamacion } = await supabase
@@ -632,7 +628,7 @@ export default function OrdenesInternas() {
       estado: 'Pendiente', diagnostico: '', trabajo_realizado: '',
       costo_estimado: '', costo_real: '', fecha_ingreso: '',
       fecha_entrega_estimada: '', fecha_entrega_real: '', notas: '',
-      descripcion_interna: ''
+      descripcion_interna: '', es_urgente: false
     })
     setEditingId(null); setShowForm(false)
     setDetalleServicios([]); setDetalleRepuestos([])
@@ -650,14 +646,17 @@ export default function OrdenesInternas() {
     }
   }
 
-  const getTipoOrdenBadge = (tipo: string) => {
+  const getTipoOrdenBadge = (tipo: string, prioridad?: number) => {
     if (tipo === 'garantia') {
       return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 flex items-center gap-1 w-fit"><Shield className="w-3 h-3" /> Garantía</span>
+    }
+    // ✅ NUEVO: badge diferenciado para interna urgente
+    if (prioridad === 3) {
+      return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800 flex items-center gap-1 w-fit"><Flame className="w-3 h-3" /> Interna urgente</span>
     }
     return <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Interna</span>
   }
 
-  // ✅ CORREGIDO: fecha local-segura (fecha pura por slice; timestamp completo sí convierte)
   const formatDate = (d: string) => {
     if (!d) return '-'
     const s = String(d)
@@ -744,6 +743,20 @@ export default function OrdenesInternas() {
                   <option value="Cancelada">Cancelada</option>
                 </select>
               </div>
+              {/* ✅ NUEVO: checkbox Orden Urgente */}
+              <div className="flex items-end pb-2">
+                <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.es_urgente}
+                    onChange={(e) => setFormData({ ...formData, es_urgente: e.target.checked })}
+                    className="w-4 h-4 accent-orange-600"
+                  />
+                  <Flame className="w-4 h-4 text-orange-600" />
+                  <span className="font-medium">Orden urgente</span>
+                </label>
+                <p className="text-xs text-slate-500 ml-2">(prioridad 3 — se ubica antes que las internas normales)</p>
+              </div>
               <div><label className="block text-sm font-medium text-slate-700 mb-1">Fecha Ingreso *</label><input type="date" value={formData.fecha_ingreso} onChange={(e) => setFormData({...formData, fecha_ingreso: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none" required /></div>
               <div className="md:col-span-3">
                 <label className="block text-sm font-medium text-slate-700 mb-1">
@@ -782,7 +795,6 @@ export default function OrdenesInternas() {
                   </table>
                 </div>
               )}
-              {/* ✅ FCS: asistente de promesa de entrega en vivo */}
               {(calculandoPromesa || promesaPreview) && (
                 <div className={`mt-3 rounded-lg p-3 text-sm ${promesaPreview?.ok ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'}`}>
                   {calculandoPromesa ? (
@@ -792,7 +804,7 @@ export default function OrdenesInternas() {
                       <span className="font-semibold flex items-center gap-1"><Clock className="w-4 h-4" /> Promesa de entrega: {formatDate(promesaPreview.fechaPrometida!)}</span>
                       <span>Mecánico sugerido: {promesaPreview.mecanicoNombre}</span>
                       <span>Duración: {fmtMin(promesaPreview.minutosTotales || 0)}</span>
-                      <span className="text-xs text-green-700">(interna: se ubica en horas valle)</span>
+                      <span className="text-xs text-green-700">{formData.es_urgente ? '(urgente: aprovecha huecos libres)' : '(normal: horas valle)'}</span>
                     </div>
                   ) : (
                     <span className="text-amber-800 flex items-center gap-1"><AlertTriangle className="w-4 h-4" /> {promesaPreview?.error}</span>
@@ -943,7 +955,8 @@ export default function OrdenesInternas() {
                             </div>
                           )}
                         </td>
-                        <td className="px-6 py-4">{getTipoOrdenBadge(o.tipo_orden)}</td>
+                        {/* ✅ NUEVO: badge diferenciado para urgente */}
+                        <td className="px-6 py-4">{getTipoOrdenBadge(o.tipo_orden, o.prioridad)}</td>
                         <td className="px-6 py-4 text-sm text-slate-600">{o.bicicleta_info}</td>
                         <td className="px-6 py-4 text-sm">
                           {!o.mecanico_id && (o.estado === 'Pendiente' || o.estado === 'En Proceso') ? (
@@ -1003,7 +1016,7 @@ export default function OrdenesInternas() {
           titulo={`Orden ${modalDetalle.numero_orden}`}
           campos={[
             { label: 'Foto Bicicleta', value: modalDetalle.bicicleta_foto, tipo: 'imagen' },
-            { label: 'Tipo de Orden', value: modalDetalle.tipo_orden === 'garantia' ? 'Garantía' : 'Interna (Reacondicionamiento)', tipo: 'estado' },
+            { label: 'Tipo de Orden', value: modalDetalle.tipo_orden === 'garantia' ? 'Garantía' : (modalDetalle.prioridad === 3 ? 'Interna urgente' : 'Interna (Reacondicionamiento)'), tipo: 'estado' },
             { label: 'Objeto / Trabajo (interna)', value: modalDetalle.descripcion_interna || '-', tipo: 'texto' },
             { label: 'Bicicleta', value: `${modalDetalle.bicicleta_codigo} - ${modalDetalle.bicicleta_info}` },
             { label: 'Mecánico', value: modalDetalle.mecanico_nombre },

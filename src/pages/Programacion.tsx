@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { CalendarDays, RefreshCw, AlertTriangle, Clock, PlayCircle, Trash2, X } from 'lucide-react'
+import { CalendarDays, RefreshCw, AlertTriangle, Clock, PlayCircle, Trash2, X, Flame } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { cargarCalendario, calcularCargaRango, programarOrden, reprogramarOrden, liberarProgramacion, liberarCotizacion } from '../utils/scheduler'
 
@@ -105,7 +105,7 @@ export default function Programacion() {
             } as SlotView
           }
         })
-        .filter((x: any) => x.incluir && x.slot.estado_prog !== 'cancelada')
+        .filter((x: any) => x.incluir && x.slot.estado_prog !== 'cancelada' && x.slot.estado_prog !== 'completada')
         .map((x: any) => x.slot)
       setSlots(planos)
       const { data: ord } = await supabase
@@ -192,15 +192,17 @@ export default function Programacion() {
     if (!cal) return null
     return cal.ausencias.find(a => a.mecanico_id === mecId && f >= a.fecha_inicio && f <= a.fecha_fin) || null
   }
+
+  // ✅ CORREGIDO: distingue prioridad 3 (interna urgente) con color naranja/ámbar dashed
   function colorSlot(s: SlotView): string {
     if (s.esTentativa) return 'bg-amber-50 border-amber-400 border-dashed text-amber-800'
-    const base = s.prioridad === 1
-      ? 'bg-purple-100 border-purple-400 text-purple-800'
-      : s.prioridad === 4
-        ? 'bg-green-100 border-green-400 text-green-800'
-        : 'bg-blue-100 border-blue-400 text-blue-800'
+    if (s.prioridad === 1) return 'bg-purple-100 border-purple-400 text-purple-800'
+    if (s.prioridad === 3) return 'bg-orange-100 border-orange-400 border-dashed text-orange-800'
+    if (s.prioridad === 4) return 'bg-green-100 border-green-400 text-green-800'
+    const base = 'bg-blue-100 border-blue-400 text-blue-800'
     return s.estado_orden === 'Completada' ? `${base} opacity-50` : base
   }
+
   function colorCarga(pct: number): string {
     if (pct < 70) return 'bg-green-500'
     if (pct <= 90) return 'bg-yellow-500'
@@ -236,7 +238,6 @@ export default function Programacion() {
         </div>
       </div>
 
-      {/* Panel de capacidad (próximos 7 días) */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
         <h3 className="font-semibold text-slate-800 mb-4 flex items-center gap-2"><Clock className="w-4 h-4" /> Capacidad — próximos 7 días</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -270,7 +271,6 @@ export default function Programacion() {
         <p className="text-xs text-slate-500 mt-3">La carga incluye reservas tentativas de cotizaciones sin aprobar (vigentes según la validez configurada).</p>
       </div>
 
-      {/* Órdenes sin programar */}
       {sinProgramar.length > 0 && (
         <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-4">
           <h3 className="font-semibold text-amber-900 flex items-center gap-2 mb-3"><AlertTriangle className="w-4 h-4" /> Órdenes activas sin programar ({sinProgramar.length})</h3>
@@ -281,6 +281,7 @@ export default function Programacion() {
                   <span className="font-medium text-slate-800">{o.numero_orden}</span>
                   <span className="text-slate-600"> — {o.cliente}</span>
                   {o.prioridad === 1 && <span className="ml-2 px-2 py-0.5 bg-purple-100 text-purple-800 rounded-full text-xs font-medium">VIP/Urgente</span>}
+                  {o.prioridad === 3 && <span className="ml-2 px-2 py-0.5 bg-orange-100 text-orange-800 rounded-full text-xs font-medium flex items-center gap-1 w-fit"><Flame className="w-3 h-3" /> Interna urgente</span>}
                   <span className="ml-2 text-xs text-slate-500">{o.estado}</span>
                 </div>
                 <button onClick={() => handleProgramar(o)} disabled={accionLoading} className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
@@ -292,7 +293,6 @@ export default function Programacion() {
         </div>
       )}
 
-      {/* Gantt por mecánico */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="overflow-x-auto">
           <div style={{ minWidth: 220 + dias.length * 130 }}>
@@ -345,17 +345,17 @@ export default function Programacion() {
             </table>
           </div>
         </div>
+        {/* ✅ CORREGIDO: leyenda con Interna urgente */}
         <div className="px-6 py-3 border-t border-slate-200 flex flex-wrap gap-4 text-xs text-slate-600">
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-blue-200 border border-blue-400" /> Cliente normal</span>
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-purple-200 border border-purple-400" /> VIP / Urgente</span>
+          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-orange-100 border border-dashed border-orange-400" /> Interna urgente</span>
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-200 border border-green-400" /> Interna</span>
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-amber-50 border border-dashed border-amber-400" /> Cotización sin aprobar</span>
-          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded opacity-50 bg-blue-200 border border-blue-400" /> Completada</span>
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded border border-red-300" style={{ backgroundImage: 'repeating-linear-gradient(45deg,#fee2e2,#fee2e2 3px,#fff 3px,#fff 6px)' }} /> Ausencia</span>
         </div>
       </div>
 
-      {/* Modal de slot */}
       {modalSlot && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-xl max-w-md w-full">
